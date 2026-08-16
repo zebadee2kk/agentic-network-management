@@ -7,7 +7,20 @@ import rego.v1
 #
 # Input contract is documented in docs/architecture/LLD.md.
 
+valid_input if {
+    is_number(input.action.risk)
+    is_array(input.target.protected_roles)
+    is_number(input.incident.confidence)
+    is_number(input.environment.autonomy_level)
+}
+
 decision := {
+    "decision": "deny",
+    "reasons": ["invalid_or_incomplete_policy_input"],
+    "required_roles": [],
+} if {
+    not valid_input
+} else := {
     "decision": "deny",
     "reasons": ["destructive_risk_class_denied"],
     "required_roles": [],
