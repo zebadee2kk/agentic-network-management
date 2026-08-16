@@ -22,6 +22,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("name", sa.String(length=128), nullable=False),
         sa.Column("cidrs", sa.JSON(), nullable=False),
+        sa.Column("connector_cidrs", sa.JSON(), nullable=False),
         sa.Column("allowed_connector_types", sa.JSON(), nullable=False),
         sa.Column("max_requests_per_minute", sa.Integer(), nullable=False),
         sa.Column("enabled", sa.Boolean(), nullable=False),
