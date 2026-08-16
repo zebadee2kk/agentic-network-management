@@ -1,0 +1,12 @@
+---
+- name: Restart one allowlisted Windows service
+  hosts: target
+  gather_facts: false
+  tasks:
+    - name: Restart the reviewed service name
+      ansible.builtin.raw: >-
+        powershell.exe -NoProfile -NonInteractive -Command
+        "$service = Get-Service -Name '{{ anm_service_name }}' -ErrorAction Stop;
+        Restart-Service -InputObject $service -Force -ErrorAction Stop"
+      no_log: true
+      changed_when: true

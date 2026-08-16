@@ -1,36 +1,38 @@
 {
-  "id": "endpoint.isolate",
+  "id": "firewall.unblock_ip",
   "version": "1.0.0",
-  "description": "Isolate a standard managed endpoint from normal network communication using a reviewed endpoint-control adapter.",
+  "description": "Remove one ANM-managed IP block using the reviewed reference firewall adapter.",
   "risk": 2,
   "write": true,
-  "reversible": true,
+  "reversible": false,
   "lifecycle": "ENABLED",
   "parameters_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "additionalProperties": false,
+    "required": ["address"],
     "properties": {
+      "address": {
+        "oneOf": [
+          {"type": "string", "format": "ipv4"},
+          {"type": "string", "format": "ipv6"}
+        ]
+      },
       "reason_code": {
         "type": "string",
-        "enum": ["suspected_compromise", "malware_containment", "operator_request"]
-      },
-      "duration_minutes": {
-        "type": "integer",
-        "minimum": 5,
-        "maximum": 1440
+        "enum": ["rollback", "operator_request", "incident_resolved"]
       }
     }
   },
   "execution": {
-    "adapter": "reference_endpoint",
+    "adapter": "reference_firewall",
     "implementation": "executors/reference_adapters.py"
   },
   "verification": {
-    "strategy": "reference_endpoint_observer",
+    "strategy": "reference_firewall_observer",
     "timeout_seconds": 180
   },
-  "rollback": {"capability": "endpoint.unisolate", "version": "1.0.0"},
+  "rollback": null,
   "artifacts": [
     "executors/reference_adapters.py",
     "services/verification.py"

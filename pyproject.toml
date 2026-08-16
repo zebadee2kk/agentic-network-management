@@ -22,6 +22,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+executor = [
+  "ansible-core>=2.18,<2.21",
+  "pywinrm>=0.5,<1.0"
+]
 dev = [
   "pytest>=8.3,<9.0",
   "pytest-asyncio>=0.24,<1.0",
@@ -37,6 +41,7 @@ include = ["anm*"]
 
 [tool.setuptools.package-data]
 "anm.capability_manifests" = ["*.json"]
+"anm.execution_artifacts" = ["*.yml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,7 +1,7 @@
 {
-  "id": "windows.restart_service",
+  "id": "linux.restart_service",
   "version": "1.0.0",
-  "description": "Restart a specifically named approved Windows service on one managed asset.",
+  "description": "Restart a specifically named approved Linux service on one managed asset.",
   "risk": 2,
   "write": true,
   "reversible": false,
@@ -16,19 +16,19 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 128,
-        "pattern": "^[A-Za-z0-9_. -]+$"
+        "pattern": "^[A-Za-z0-9_.@-]+$"
       }
     }
   },
   "execution": {
-    "adapter": "ansible_windows",
-    "implementation": "execution_artifacts/windows_restart_service.yml"
+    "adapter": "ansible_linux",
+    "implementation": "execution_artifacts/linux_restart_service.yml"
   },
   "verification": {"strategy": "binding_probe", "timeout_seconds": 120},
   "rollback": null,
   "artifacts": [
     "executors/ansible_adapter.py",
-    "execution_artifacts/windows_restart_service.yml",
+    "execution_artifacts/linux_restart_service.yml",
     "services/verification.py"
   ]
 }

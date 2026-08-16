@@ -1,0 +1,10 @@
+---
+- name: Restart one allowlisted Linux service
+  hosts: target
+  gather_facts: false
+  tasks:
+    - name: Restart the reviewed service name
+      ansible.builtin.service:
+        name: "{{ anm_service_name }}"
+        state: restarted
+      no_log: true

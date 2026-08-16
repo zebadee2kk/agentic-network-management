@@ -1,6 +1,7 @@
 import hashlib
 import json
 from importlib import resources
+from pathlib import PurePosixPath
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,6 +20,18 @@ FORBIDDEN_CAPABILITY_IDS = {
     "firewall.apply_raw_config",
     "network.run_cli",
 }
+ALLOWED_EXECUTION_ADAPTERS = {
+    "reserved_phase6",
+    "ansible_windows",
+    "ansible_linux",
+    "reference_endpoint",
+    "reference_firewall",
+}
+ALLOWED_ARTIFACT_PREFIXES = {
+    "executors",
+    "execution_artifacts",
+    "services",
+}
 
 
 class CapabilityManifestSpec(BaseModel):
@@ -35,11 +48,24 @@ class CapabilityManifestSpec(BaseModel):
     execution: dict[str, Any]
     verification: dict[str, Any]
     rollback: dict[str, Any] | None = None
+    artifacts: list[str] = Field(default_factory=list, max_length=32)
 
 
 def _digest(value: Any) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _artifact_digest(path_value: str) -> str:
+    path = PurePosixPath(path_value)
+    if path.is_absolute() or not path.parts or path.parts[0] not in ALLOWED_ARTIFACT_PREFIXES:
+        raise ValueError(f"capability artifact path is outside the reviewed package: {path_value}")
+    if any(part in {".", ".."} for part in path.parts):
+        raise ValueError(f"capability artifact path is unsafe: {path_value}")
+    item = resources.files("anm").joinpath(*path.parts)
+    if not item.is_file():
+        raise ValueError(f"capability artifact is missing: {path_value}")
+    return hashlib.sha256(item.read_bytes()).hexdigest()
 
 
 def _load_builtin_manifests() -> list[CapabilityManifestSpec]:
@@ -52,11 +78,19 @@ def _load_builtin_manifests() -> list[CapabilityManifestSpec]:
         manifest = CapabilityManifestSpec.model_validate(payload)
         if manifest.id in FORBIDDEN_CAPABILITY_IDS:
             raise ValueError(f"forbidden generic capability in built-in catalogue: {manifest.id}")
-        if manifest.execution.get("adapter") != "reserved_phase6":
-            raise ValueError(
-                f"Phase 5 capability {manifest.id} contains an executable adapter; "
-                "only reserved_phase6 is permitted"
-            )
+        adapter = manifest.execution.get("adapter")
+        if adapter not in ALLOWED_EXECUTION_ADAPTERS:
+            raise ValueError(f"capability {manifest.id} uses an unreviewed execution adapter")
+        if adapter != "reserved_phase6":
+            implementation = manifest.execution.get("implementation")
+            if not isinstance(implementation, str) or implementation not in manifest.artifacts:
+                raise ValueError(
+                    f"executable capability {manifest.id} must bind its implementation artifact"
+                )
+            if not manifest.artifacts:
+                raise ValueError(f"executable capability {manifest.id} has no reviewed artifacts")
+        for artifact in manifest.artifacts:
+            _artifact_digest(artifact)
         manifests.append(manifest)
     if not manifests:
         raise ValueError("built-in capability catalogue is empty")
@@ -66,11 +100,16 @@ def _load_builtin_manifests() -> list[CapabilityManifestSpec]:
 def capability_digests(manifest: CapabilityManifestSpec) -> tuple[str, str, str]:
     manifest_dict = manifest.model_dump(mode="json")
     manifest_digest = _digest(manifest_dict)
+    artifact_digests = {
+        artifact: _artifact_digest(artifact)
+        for artifact in sorted(manifest.artifacts)
+    }
     implementation_digest = _digest(
         {
             "execution": manifest.execution,
             "verification": manifest.verification,
             "rollback": manifest.rollback,
+            "artifacts": artifact_digests,
         }
     )
     capability_digest = _digest(

@@ -29,6 +29,20 @@ jobs:
           ANM_DATABASE_URL: sqlite+pysqlite:///./migration-smoke.db
         run: alembic upgrade head
 
+  phase6-safety:
+    name: Phase 6 execution safety
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e '.[dev]'
+      - name: Execution safety tests
+        run: pytest -q tests/test_phase6_execution.py
+
   policy:
     name: OPA policy
     runs-on: ubuntu-latest
@@ -73,7 +87,7 @@ jobs:
 
   appliance:
     name: Appliance smoke test
-    needs: [python, policy, ui, compose]
+    needs: [python, phase6-safety, policy, ui, compose]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,11 +95,11 @@ jobs:
         run: docker compose up -d --build
       - name: Require worker and relay health
         run: |
-          for worker in discovery-worker telemetry-worker ai-worker model-relay; do
+          for worker in discovery-worker telemetry-worker ai-worker model-relay executor-worker verifier-worker; do
             worker_id=$(docker compose ps -q "$worker")
             test -n "$worker_id"
             healthy=false
-            for attempt in $(seq 1 30); do
+            for attempt in $(seq 1 45); do
               worker_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$worker_id")
               if [ "$worker_state" = "healthy" ]; then
                 healthy=true
@@ -104,14 +118,23 @@ jobs:
               exit 1
             fi
           done
-      - name: Require end-to-end readiness with AI disabled
+      - name: Require end-to-end readiness and safe execution default
         run: |
           for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error               http://127.0.0.1:8080/health/ready               --output /tmp/anm-readiness.json; then
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:8080/health/ready \
+              --output /tmp/anm-readiness.json; then
               cat /tmp/anm-readiness.json
-              curl --fail --silent --show-error                 http://127.0.0.1:8080/api/v1/ai/status                 --output /tmp/anm-ai-status.json
+              curl --fail --silent --show-error \
+                http://127.0.0.1:8080/api/v1/ai/status \
+                --output /tmp/anm-ai-status.json
               cat /tmp/anm-ai-status.json
               grep -q '"enabled":false' /tmp/anm-ai-status.json
+              curl --fail --silent --show-error \
+                http://127.0.0.1:8080/api/v1/execution-control \
+                --output /tmp/anm-execution-control.json
+              cat /tmp/anm-execution-control.json
+              grep -q '"enabled":false' /tmp/anm-execution-control.json
               exit 0
             fi
             sleep 2

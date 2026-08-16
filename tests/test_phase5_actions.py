@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from anm.action_models import ActionApproval, ActionProposal, CapabilityDefinition
+from anm.action_models import ActionProposal, CapabilityDefinition
 from anm.action_schemas import ActionProposalCreate, ActionProposalRevision
 from anm.auth import Principal
 from anm.config import Settings
@@ -368,20 +368,23 @@ async def test_invalid_capability_parameters_fail_before_policy_call() -> None:
     assert db.scalar(select(ActionProposal)) is None
 
 
-def test_builtin_catalogue_contains_no_executable_adapter_or_generic_shell_capability() -> None:
+def test_builtin_catalogue_uses_only_reviewed_adapters_and_no_generic_shell_capability() -> None:
     db = make_db()
     definitions = list(db.scalars(select(CapabilityDefinition)))
     assert definitions
     forbidden = {"shell.exec", "ssh.run", "powershell.run", "network.run_cli"}
+    allowed_adapters = {
+        "reserved_phase6",
+        "ansible_windows",
+        "ansible_linux",
+        "reference_endpoint",
+        "reference_firewall",
+    }
     assert not forbidden.intersection(item.capability_id for item in definitions)
     for definition in definitions:
-        assert definition.manifest["execution"]["adapter"] == "reserved_phase6"
-
-
-def test_approval_records_are_state_only_and_have_no_execution_fields() -> None:
-    columns = set(ActionApproval.__table__.columns.keys())
-    assert "proposal_digest" in columns
-    assert "implementation_digest" in columns
-    assert "command" not in columns
-    assert "shell" not in columns
-    assert "execution_id" not in columns
+        adapter = definition.manifest["execution"]["adapter"]
+        assert adapter in allowed_adapters
+        if adapter != "reserved_phase6":
+            assert definition.manifest.get("artifacts")
+            implementation = definition.manifest["execution"]["implementation"]
+            assert implementation in definition.manifest["artifacts"]

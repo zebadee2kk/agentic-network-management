@@ -45,6 +45,7 @@ class EventBus:
         streams = {
             "SYSTEM": ["system.>"],
             "AUDIT": ["audit.>"],
+            "ACTIONS": ["action.>"],
             "OBSERVATIONS": [
                 "discovery.>",
                 "asset.observed.>",

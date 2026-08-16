@@ -29,6 +29,7 @@ services:
       ANM_OPA_URL: http://opa:8181
       ANM_OPENBAO_URL: http://openbao:8200
       ANM_UI_ORIGIN: http://localhost:8080
+      ANM_AUTONOMY_LEVEL: ${ANM_AUTONOMY_LEVEL:-2}
       ANM_AI_ENABLED: ${ANM_AI_ENABLED:-false}
       ANM_MODEL_RELAY_URL: http://model-relay:8090
     depends_on:
@@ -191,6 +192,86 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  executor-worker:
+    build:
+      context: .
+      dockerfile: services/executor/Dockerfile
+    environment:
+      ANM_ENV: ${ANM_ENV:-development}
+      ANM_LOG_LEVEL: ${ANM_LOG_LEVEL:-INFO}
+      ANM_AUTH_MODE: local
+      ANM_DATABASE_URL: postgresql+psycopg://anm:anm@postgres:5432/anm
+      ANM_NATS_URL: nats://nats:4222
+      ANM_OPA_URL: http://opa:8181
+      ANM_OPENBAO_URL: http://openbao:8200
+      ANM_OPENBAO_TOKEN_FILE: /run/secrets/openbao_token
+      ANM_AUTONOMY_LEVEL: ${ANM_AUTONOMY_LEVEL:-2}
+      ANM_EXECUTION_STALE_SECONDS: ${ANM_EXECUTION_STALE_SECONDS:-300}
+    volumes:
+      - ./config/development/openbao-token:/run/secrets/openbao_token:ro
+    depends_on:
+      control-api:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      opa:
+        condition: service_started
+      openbao:
+        condition: service_started
+    networks:
+      - control
+      - data
+      - secrets
+      - execution
+    read_only: true
+    tmpfs:
+      - /run/anm-executor:rw,noexec,nosuid,nodev,size=32m
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  verifier-worker:
+    build:
+      context: .
+      dockerfile: services/control_api/Dockerfile
+    command: ["python", "-m", "anm.verification_worker"]
+    environment:
+      ANM_ENV: ${ANM_ENV:-development}
+      ANM_LOG_LEVEL: ${ANM_LOG_LEVEL:-INFO}
+      ANM_AUTH_MODE: local
+      ANM_DATABASE_URL: postgresql+psycopg://anm:anm@postgres:5432/anm
+      ANM_NATS_URL: nats://nats:4222
+    depends_on:
+      control-api:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    networks:
+      - control
+      - data
+      - verification
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -259,6 +340,8 @@ networks:
   discovery:
   telemetry:
   model-egress:
+  execution:
+  verification:
   api:
     internal: true
   control:

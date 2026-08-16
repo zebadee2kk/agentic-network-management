@@ -1,10 +1,10 @@
 {
-  "id": "endpoint.isolate",
+  "id": "endpoint.unisolate",
   "version": "1.0.0",
-  "description": "Isolate a standard managed endpoint from normal network communication using a reviewed endpoint-control adapter.",
+  "description": "Remove ANM-managed endpoint isolation through the reviewed endpoint-control adapter.",
   "risk": 2,
   "write": true,
-  "reversible": true,
+  "reversible": false,
   "lifecycle": "ENABLED",
   "parameters_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -13,12 +13,7 @@
     "properties": {
       "reason_code": {
         "type": "string",
-        "enum": ["suspected_compromise", "malware_containment", "operator_request"]
-      },
-      "duration_minutes": {
-        "type": "integer",
-        "minimum": 5,
-        "maximum": 1440
+        "enum": ["rollback", "operator_request", "incident_resolved"]
       }
     }
   },
@@ -30,7 +25,7 @@
     "strategy": "reference_endpoint_observer",
     "timeout_seconds": 180
   },
-  "rollback": {"capability": "endpoint.unisolate", "version": "1.0.0"},
+  "rollback": null,
   "artifacts": [
     "executors/reference_adapters.py",
     "services/verification.py"
