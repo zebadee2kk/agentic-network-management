@@ -21,7 +21,7 @@ jobs:
       - name: Install
         run: pip install -e '.[dev]'
       - name: Lint
-        run: ruff check services/control_api tests
+        run: ruff check services/control_api tests tools
       - name: Unit tests
         run: pytest -q
       - name: Migration smoke test
@@ -66,3 +66,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate Compose model
         run: docker compose config --quiet
+      - name: Validate trust boundaries
+        run: |
+          docker compose config --format json > /tmp/anm-compose.json
+          python3 tools/validate_compose_boundaries.py /tmp/anm-compose.json
