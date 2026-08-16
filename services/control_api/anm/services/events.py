@@ -1,7 +1,7 @@
 import asyncio
 import json
-from datetime import datetime, timezone
-from typing import Any
+from contextlib import suppress
+from datetime import UTC, datetime
 
 import nats
 from nats.aio.client import Client as NATS
@@ -54,11 +54,9 @@ class EventBus:
 
     async def _dispatch_loop(self) -> None:
         while not self._stop.is_set():
-            try:
+            # The database is authoritative. Publication failure leaves events pending.
+            with suppress(Exception):
                 await self.dispatch_pending(limit=100)
-            except Exception:
-                # The database is authoritative. Publication failure leaves events pending.
-                pass
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=1.0)
             except TimeoutError:
@@ -85,7 +83,7 @@ class EventBus:
                     payload,
                     headers={"Nats-Msg-Id": row.message_id},
                 )
-                row.published_at = datetime.now(timezone.utc)
+                row.published_at = datetime.now(UTC)
                 db.commit()
                 published += 1
         return published
