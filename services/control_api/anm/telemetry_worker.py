@@ -5,7 +5,6 @@ from contextlib import suppress
 
 import nats
 from nats.errors import TimeoutError as NATSTimeoutError
-from nats.js.errors import NotFoundError
 from sqlalchemy import select
 
 from anm.config import get_settings
@@ -17,6 +16,7 @@ from anm.services.discovery import DiscoveryConfigurationError, validate_connect
 from anm.services.events import claim_message
 from anm.services.secrets import OpenBaoClient
 from anm.services.security import ingest_event
+from anm.services.streams import ensure_stream
 
 CONSUMER = "phase3-wazuh-telemetry-worker"
 SUBJECT = "telemetry.wazuh.poll_requested"
@@ -176,14 +176,7 @@ async def run_worker() -> None:
     secrets = OpenBaoClient(settings)
     nc = await _connect_nats(settings.nats_url)
     js = nc.jetstream()
-    try:
-        await js.stream_info("OBSERVATIONS")
-    except NotFoundError:
-        await js.add_stream(
-            name="OBSERVATIONS",
-            subjects=OBSERVATION_SUBJECTS,
-            storage="file",
-        )
+    await ensure_stream(js, name="OBSERVATIONS", subjects=OBSERVATION_SUBJECTS)
     subscription = await js.pull_subscribe(
         SUBJECT,
         durable=CONSUMER,
