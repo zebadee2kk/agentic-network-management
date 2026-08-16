@@ -18,7 +18,9 @@ class AuditService:
         details: dict[str, Any] | None = None,
         correlation_id: str | None = None,
     ) -> AuditEvent:
+        event_id = uuid.uuid4()
         event = AuditEvent(
+            id=event_id,
             actor_type="user" if principal.provider != "service" else "service",
             actor_id=principal.subject,
             action=action,
@@ -35,7 +37,7 @@ class AuditService:
                 message_id=message_id,
                 payload={
                     "message_id": message_id,
-                    "audit_event_id": str(event.id),
+                    "audit_event_id": str(event_id),
                     "actor_type": event.actor_type,
                     "actor_id": event.actor_id,
                     "action": action,
