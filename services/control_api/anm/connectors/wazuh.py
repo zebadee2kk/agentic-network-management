@@ -54,9 +54,17 @@ class WazuhIndexerConnector:
         body: dict[str, Any] = {
             "size": safe_size,
             "track_total_hits": False,
-            "sort": [{"timestamp": "asc"}, {"_id": "asc"}],
+            "sort": [{"timestamp": "asc"}, {"id": "asc"}],
             "query": {"match_all": {}},
-            "_source": ["timestamp", "agent", "rule", "data", "full_log", "location"],
+            "_source": [
+                "timestamp",
+                "id",
+                "agent",
+                "rule",
+                "data",
+                "full_log",
+                "location",
+            ],
         }
         if search_after:
             body["search_after"] = search_after
