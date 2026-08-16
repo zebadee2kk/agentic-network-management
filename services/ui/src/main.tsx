@@ -89,6 +89,12 @@ type Capability = {
   write: boolean;
   reversible: boolean;
   lifecycle: string;
+  manifest: {
+    execution?: {
+      adapter?: string;
+      implementation?: string;
+    };
+  };
   capability_digest: string;
   implementation_digest: string;
 };
@@ -131,6 +137,53 @@ type ApprovalQueueItem = {
   approvals: Approval[];
 };
 
+type ExecutionControl = {
+  enabled: boolean;
+  reason: string;
+  updated_at?: string | null;
+};
+
+type Execution = {
+  id: string;
+  proposal_id: string;
+  binding_id?: string | null;
+  rollback_of_execution_id?: string | null;
+  idempotency_key: string;
+  capability: string;
+  capability_version: string;
+  target_asset_id: string;
+  proposal_digest: string;
+  capability_digest: string;
+  implementation_digest: string;
+  policy_version: string;
+  target_criticality: string;
+  target_protected_roles: string[];
+  state: string;
+  pre_state: Record<string, unknown>;
+  executor_result: Record<string, unknown>;
+  verification_result: Record<string, unknown>;
+  error_category?: string | null;
+  error_detail?: string | null;
+  queued_at: string;
+  started_at?: string | null;
+  executor_completed_at?: string | null;
+  verified_at?: string | null;
+  completed_at?: string | null;
+};
+
+const DISPATCH_ROLES = new Set([
+  "platform_admin",
+  "security_admin",
+  "network_operator",
+  "endpoint_operator",
+]);
+
+const ROLLBACK_ELIGIBLE_STATES = new Set([
+  "SUCCEEDED",
+  "VERIFICATION_FAILED",
+  "AMBIGUOUS",
+]);
+
 function App() {
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [principal, setPrincipal] = useState<Principal | null>(null);
@@ -142,6 +195,9 @@ function App() {
   const [investigations, setInvestigations] = useState<Investigation[]>([]);
   const [capabilities, setCapabilities] = useState<Capability[]>([]);
   const [approvalQueue, setApprovalQueue] = useState<ApprovalQueueItem[]>([]);
+  const [proposals, setProposals] = useState<ActionProposal[]>([]);
+  const [executionControl, setExecutionControl] = useState<ExecutionControl | null>(null);
+  const [executions, setExecutions] = useState<Execution[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -157,6 +213,9 @@ function App() {
         fetch("/api/v1/investigations?limit=12"),
         fetch("/api/v1/capabilities"),
         fetch("/api/v1/action-proposals/approval-queue?limit=50"),
+        fetch("/api/v1/action-proposals?limit=50"),
+        fetch("/api/v1/execution-control"),
+        fetch("/api/v1/executions?limit=50"),
       ]);
       const [
         readyResponse,
@@ -169,6 +228,9 @@ function App() {
         investigationsResponse,
         capabilitiesResponse,
         approvalQueueResponse,
+        proposalsResponse,
+        executionControlResponse,
+        executionsResponse,
       ] = responses;
       const readyBody = (await readyResponse.json()) as Readiness;
       for (const response of responses.slice(1)) {
@@ -186,6 +248,9 @@ function App() {
       setInvestigations((await investigationsResponse.json()) as Investigation[]);
       setCapabilities((await capabilitiesResponse.json()) as Capability[]);
       setApprovalQueue((await approvalQueueResponse.json()) as ApprovalQueueItem[]);
+      setProposals((await proposalsResponse.json()) as ActionProposal[]);
+      setExecutionControl((await executionControlResponse.json()) as ExecutionControl);
+      setExecutions((await executionsResponse.json()) as Execution[]);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Control plane unavailable");
@@ -229,6 +294,97 @@ function App() {
     }
   }
 
+  async function setExecutionEnabled(enabled: boolean) {
+    if (!principal?.roles.includes("platform_admin")) {
+      setError("platform_admin role is required to change the execution kill switch");
+      return;
+    }
+    const confirmation = enabled
+      ? "Enable deterministic infrastructure execution? Only already-authorized typed capabilities can dispatch, but this permits real managed-system changes."
+      : "Disable new deterministic execution immediately? Monitoring and investigation remain active.";
+    if (!window.confirm(confirmation)) {
+      return;
+    }
+    try {
+      const response = await fetch("/api/v1/execution-control", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled,
+          reason: enabled
+            ? "Enabled from operator dashboard"
+            : "Emergency disable from operator dashboard",
+        }),
+      });
+      if (!response.ok) {
+        const body = (await response.json()) as { detail?: string };
+        throw new Error(body.detail ?? `execution control update failed: ${response.status}`);
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Execution control update failed");
+    }
+  }
+
+  async function dispatchProposal(proposal: ActionProposal) {
+    const capability = capabilityForProposal(proposal);
+    if (!capability || !isExecutable(capability)) {
+      setError("This proposal does not use a reviewed Phase 6 execution adapter");
+      return;
+    }
+    if (!executionControl?.enabled) {
+      setError("Execution is disabled by the global kill switch");
+      return;
+    }
+    if (!principalCanDispatch()) {
+      setError("Your current roles do not permit execution dispatch");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Dispatch ${proposal.capability} against ${proposal.target_asset_id.slice(0, 8)}? ` +
+          "The control plane and executor will re-check authorization before any side effect.",
+      )
+    ) {
+      return;
+    }
+    try {
+      const response = await fetch(`/api/v1/action-proposals/${proposal.id}/dispatch`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const body = (await response.json()) as { detail?: string };
+        throw new Error(body.detail ?? `dispatch failed: ${response.status}`);
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Dispatch failed");
+    }
+  }
+
+  async function planRollback(execution: Execution) {
+    if (
+      !window.confirm(
+        `Create a policy-gated rollback proposal for ${execution.capability}? ` +
+          "This does not execute rollback directly.",
+      )
+    ) {
+      return;
+    }
+    try {
+      const response = await fetch(`/api/v1/executions/${execution.id}/rollback-proposal`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const body = (await response.json()) as { detail?: string };
+        throw new Error(body.detail ?? `rollback planning failed: ${response.status}`);
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Rollback planning failed");
+    }
+  }
+
   function principalCanApprove(proposal: ActionProposal): boolean {
     const roles = new Set(principal?.roles ?? []);
     return proposal.required_roles.every((requiredRole) => {
@@ -246,6 +402,39 @@ function App() {
     });
   }
 
+  function principalCanDispatch(): boolean {
+    return (principal?.roles ?? []).some((role) => DISPATCH_ROLES.has(role));
+  }
+
+  function capabilityForProposal(proposal: ActionProposal): Capability | undefined {
+    return capabilities.find(
+      (item) =>
+        item.capability_id === proposal.capability && item.version === proposal.capability_version,
+    );
+  }
+
+  function capabilityForExecution(execution: Execution): Capability | undefined {
+    return capabilities.find(
+      (item) =>
+        item.capability_id === execution.capability && item.version === execution.capability_version,
+    );
+  }
+
+  function isExecutable(capability: Capability): boolean {
+    const adapter = capability.manifest.execution?.adapter;
+    return Boolean(adapter && adapter !== "reserved_phase6");
+  }
+
+  function executionStateClass(state: string): "ok" | "degraded" | "down" {
+    if (state === "SUCCEEDED") {
+      return "ok";
+    }
+    if (["FAILED", "VERIFICATION_FAILED", "CANCELLED"].includes(state)) {
+      return "down";
+    }
+    return "degraded";
+  }
+
   useEffect(() => {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 10_000);
@@ -258,6 +447,13 @@ function App() {
   const openIncidents = incidents.filter(
     (incident) => incident.state !== "CLOSED" && incident.state !== "FALSE_POSITIVE",
   );
+  const authorizedExecutableProposals = proposals.filter((proposal) => {
+    const capability = capabilityForProposal(proposal);
+    return proposal.state === "AUTHORIZED" && capability != null && isExecutable(capability);
+  });
+  const pendingDispatchProposals = authorizedExecutableProposals.filter(
+    (proposal) => !executions.some((execution) => execution.proposal_id === proposal.id),
+  );
 
   return (
     <main>
@@ -266,8 +462,8 @@ function App() {
           <p className="eyebrow">AUTONOMOUS INFRASTRUCTURE OPERATIONS</p>
           <h1>Agentic Network Management</h1>
           <p className="subtitle">
-            Reconcile infrastructure state, normalize security evidence, investigate incidents and
-            authorize typed remediation proposals without giving AI execution authority.
+            Reconcile infrastructure state, investigate security incidents and execute only typed,
+            policy-authorized remediation through a deterministic, independently verified worker.
           </p>
         </div>
         <div className={`state ${readiness?.ready ? "ok" : "down"}`}>
@@ -299,6 +495,162 @@ function App() {
             ))
           ) : (
             <article className="card"><p>Loading dependency state…</p></article>
+          )}
+        </div>
+      </section>
+
+      <section>
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">DETERMINISTIC EXECUTION</p>
+            <h2>{pendingDispatchProposals.length} authorized actions ready to dispatch</h2>
+          </div>
+          <span className={`pill ${executionControl?.enabled ? "down" : "ok"}`}>
+            execution {executionControl?.enabled ? "enabled" : "disabled"}
+          </span>
+        </div>
+        <div className="grid">
+          <article className="card">
+            <div className="card-title">
+              <h3>Global execution kill switch</h3>
+              <span className={`pill ${executionControl?.enabled ? "down" : "ok"}`}>
+                {executionControl?.enabled ? "live writes permitted" : "safe default"}
+              </span>
+            </div>
+            <p>{executionControl?.reason ?? "Loading execution policy state…"}</p>
+            <p className="protected">
+              AI has no execution or secret access. Dispatch and the executor re-check OPA,
+              approvals, digests and target state before any side effect.
+            </p>
+            {principal?.roles.includes("platform_admin") ? (
+              <div className="actions">
+                {executionControl?.enabled ? (
+                  <button onClick={() => void setExecutionEnabled(false)}>Emergency disable</button>
+                ) : (
+                  <button onClick={() => void setExecutionEnabled(true)}>Enable execution</button>
+                )}
+              </div>
+            ) : (
+              <p>Only a platform administrator can change this switch.</p>
+            )}
+          </article>
+          <article className="card">
+            <div className="card-title">
+              <h3>Execution boundary</h3>
+              <span className="pill ok">deterministic only</span>
+            </div>
+            <p>Executor: policy + approvals + JIT OpenBao secret + reviewed adapter.</p>
+            <p>Verifier: separate read-only observation path with no secret access.</p>
+            <p className="protected">
+              Executor success is intermediate. Only independent verification can produce SUCCEEDED.
+            </p>
+          </article>
+        </div>
+        <div className="review-list">
+          {pendingDispatchProposals.map((proposal) => {
+            const capability = capabilityForProposal(proposal);
+            const adapter = capability?.manifest.execution?.adapter ?? "unknown";
+            const mayDispatch = executionControl?.enabled === true && principalCanDispatch();
+            return (
+              <article key={proposal.id} className="card review-card">
+                <div>
+                  <div className="card-title">
+                    <h3>{proposal.capability}</h3>
+                    <span className="pill degraded">risk {capability?.risk ?? "?"}</span>
+                  </div>
+                  <p>
+                    Target {proposal.target_asset_id.slice(0, 8)} · incident{" "}
+                    {proposal.incident_id.slice(0, 8)} · adapter {adapter}
+                  </p>
+                  <p>{proposal.reason}</p>
+                  <p>
+                    Proposal {proposal.proposal_digest.slice(0, 12)}… · implementation{" "}
+                    {proposal.implementation_digest.slice(0, 12)}… · policy {proposal.policy_version}
+                  </p>
+                  {!executionControl?.enabled && (
+                    <p className="protected">Dispatch blocked by the global execution kill switch.</p>
+                  )}
+                  {!principalCanDispatch() && (
+                    <p className="protected">Your current roles do not permit dispatch.</p>
+                  )}
+                </div>
+                <div className="actions">
+                  <button disabled={!mayDispatch} onClick={() => void dispatchProposal(proposal)}>
+                    Dispatch
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+          {pendingDispatchProposals.length === 0 && (
+            <article className="card">
+              <p>No newly authorized executable proposals are waiting for dispatch.</p>
+            </article>
+          )}
+        </div>
+      </section>
+
+      <section>
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">EXECUTION VERIFICATION</p>
+            <h2>{executions.length} recent execution records</h2>
+          </div>
+          <span className="pill ok">independent verification required</span>
+        </div>
+        <div className="review-list">
+          {executions.map((execution) => {
+            const capability = capabilityForExecution(execution);
+            const canPlanRollback =
+              capability?.reversible === true && ROLLBACK_ELIGIBLE_STATES.has(execution.state);
+            return (
+              <article key={execution.id} className="card review-card">
+                <div>
+                  <div className="card-title">
+                    <h3>{execution.capability}</h3>
+                    <span className={`pill ${executionStateClass(execution.state)}`}>
+                      {execution.state}
+                    </span>
+                  </div>
+                  <p>
+                    Execution {execution.id.slice(0, 8)} · target{" "}
+                    {execution.target_asset_id.slice(0, 8)} · criticality {execution.target_criticality}
+                  </p>
+                  <p>
+                    Proposal {execution.proposal_digest.slice(0, 12)}… · implementation{" "}
+                    {execution.implementation_digest.slice(0, 12)}…
+                  </p>
+                  {execution.rollback_of_execution_id && (
+                    <p>Rollback of execution {execution.rollback_of_execution_id.slice(0, 8)}</p>
+                  )}
+                  {execution.state === "AMBIGUOUS" && (
+                    <p className="protected">
+                      Remote outcome is uncertain. The executor will not blindly retry this action.
+                    </p>
+                  )}
+                  {execution.state === "VERIFICATION_FAILED" && (
+                    <p className="protected">
+                      The executor reported success, but the independent verifier did not observe the
+                      required end state.
+                    </p>
+                  )}
+                  {execution.error_category && (
+                    <p className="protected">
+                      {execution.error_category}
+                      {execution.error_detail ? ` · ${execution.error_detail}` : ""}
+                    </p>
+                  )}
+                </div>
+                {canPlanRollback && (
+                  <div className="actions">
+                    <button onClick={() => void planRollback(execution)}>Plan rollback</button>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+          {executions.length === 0 && (
+            <article className="card"><p>No execution has been dispatched yet.</p></article>
           )}
         </div>
       </section>
@@ -344,15 +696,11 @@ function App() {
             <p className="eyebrow">POLICY-GATED AUTHORIZATION</p>
             <h2>{approvalQueue.length} proposals awaiting approval</h2>
           </div>
-          <span className="pill degraded">no executor in Phase 5</span>
+          <span className="pill degraded">approval is not execution</span>
         </div>
         <div className="review-list">
           {approvalQueue.map(({ proposal, approvals }) => {
-            const capability = capabilities.find(
-              (item) =>
-                item.capability_id === proposal.capability &&
-                item.version === proposal.capability_version,
-            );
+            const capability = capabilityForProposal(proposal);
             const mayApprove = principalCanApprove(proposal);
             return (
               <article key={proposal.id} className="card review-card">
@@ -385,7 +733,7 @@ function App() {
                     · implementation {proposal.implementation_digest.slice(0, 12)}…
                   </p>
                   <p className="protected">
-                    AUTHORIZED means authorization state only. Phase 5 cannot execute this action.
+                    Approval authorizes this exact digest only. Dispatch is a separate Phase 6 gate.
                   </p>
                   {approvals.length > 0 && (
                     <p>{approvals.length} prior decision record(s) retained for audit.</p>
@@ -411,8 +759,8 @@ function App() {
             <article className="card">
               <p>No policy-gated proposals currently require a human decision.</p>
               <p className="protected">
-                The capability catalogue contains {capabilities.length} enabled typed operations;
-                none has an execution path in Phase 5.
+                {capabilities.filter(isExecutable).length} of {capabilities.length} enabled typed
+                operations currently bind reviewed deterministic execution adapters.
               </p>
             </article>
           )}
@@ -437,7 +785,7 @@ function App() {
             </div>
             <p>{aiStatus?.configured_providers ?? 0} configured providers</p>
             <p>Reasoning worker → internal model relay → provider</p>
-            <p className="protected">No managed-network or secret access from ai-worker</p>
+            <p className="protected">No managed-network, execution or secret access from ai-worker</p>
           </article>
           {investigations.slice(0, 11).map((investigation) => (
             <article key={investigation.id} className="card asset-card">
@@ -584,9 +932,9 @@ function App() {
       </section>
 
       <footer>
-        Phase 5 adds typed proposal and approval state only. OPA evaluates authorization and human
-        decisions bind exact digests; there is no executor, infrastructure write worker or
-        AI-controlled remediation path.
+        Phase 6 permits only reviewed deterministic capabilities. AI remains read-only; secrets stay
+        inside the isolated executor; ambiguous outcomes are never blindly retried; success requires
+        independent verification; rollback follows the normal proposal, OPA and approval path.
       </footer>
     </main>
   );
