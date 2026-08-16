@@ -1,0 +1,18 @@
+{
+  "id": "inventory.refresh",
+  "version": "1.0.0",
+  "description": "Refresh read-only canonical inventory from approved discovery connectors.",
+  "risk": 0,
+  "write": false,
+  "reversible": false,
+  "lifecycle": "ENABLED",
+  "parameters_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "execution": {"adapter": "reserved_phase6", "implementation": "capability:inventory.refresh"},
+  "verification": {"strategy": "inventory_timestamp_advanced", "timeout_seconds": 120},
+  "rollback": null
+}

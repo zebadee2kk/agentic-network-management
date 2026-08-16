@@ -17,7 +17,8 @@ dependencies = [
   "psycopg[binary]>=3.2,<4.0",
   "nats-py>=2.9,<3.0",
   "httpx>=0.27,<1.0",
-  "structlog>=24.4,<26.0"
+  "structlog>=24.4,<26.0",
+  "jsonschema>=4.23,<5.0"
 ]
 
 [project.optional-dependencies]
@@ -27,13 +28,15 @@ dev = [
   "pytest-cov>=5.0,<7.0",
   "ruff>=0.7,<1.0",
   "mypy>=1.13,<2.0",
-  "aiosqlite>=0.20,<1.0",
-  "jsonschema>=4.23,<5.0"
+  "aiosqlite>=0.20,<1.0"
 ]
 
 [tool.setuptools.packages.find]
 where = ["services/control_api"]
 include = ["anm*"]
+
+[tool.setuptools.package-data]
+"anm.capability_manifests" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

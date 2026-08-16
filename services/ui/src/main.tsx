@@ -80,6 +80,57 @@ type Investigation = {
   created_at: string;
 };
 
+type Capability = {
+  id: string;
+  capability_id: string;
+  version: string;
+  description: string;
+  risk: number;
+  write: boolean;
+  reversible: boolean;
+  lifecycle: string;
+  capability_digest: string;
+  implementation_digest: string;
+};
+
+type ActionProposal = {
+  id: string;
+  revision: number;
+  capability: string;
+  capability_version: string;
+  capability_digest: string;
+  implementation_digest: string;
+  target_asset_id: string;
+  parameters: Record<string, unknown>;
+  reason: string;
+  incident_id: string;
+  evidence_ids: string[];
+  confidence: number;
+  proposal_digest: string;
+  state: string;
+  policy_decision: string;
+  policy_reasons: string[];
+  required_roles: string[];
+  policy_source: string;
+  policy_version: string;
+  created_at: string;
+};
+
+type Approval = {
+  id: string;
+  proposal_id: string;
+  approver_id: string;
+  approver_roles: string[];
+  decision: string;
+  valid: boolean;
+  created_at: string;
+};
+
+type ApprovalQueueItem = {
+  proposal: ActionProposal;
+  approvals: Approval[];
+};
+
 function App() {
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [principal, setPrincipal] = useState<Principal | null>(null);
@@ -89,6 +140,8 @@ function App() {
   const [events, setEvents] = useState<SecurityEvent[]>([]);
   const [aiStatus, setAIStatus] = useState<AIStatus | null>(null);
   const [investigations, setInvestigations] = useState<Investigation[]>([]);
+  const [capabilities, setCapabilities] = useState<Capability[]>([]);
+  const [approvalQueue, setApprovalQueue] = useState<ApprovalQueueItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -102,6 +155,8 @@ function App() {
         fetch("/api/v1/events?limit=12"),
         fetch("/api/v1/ai/status"),
         fetch("/api/v1/investigations?limit=12"),
+        fetch("/api/v1/capabilities"),
+        fetch("/api/v1/action-proposals/approval-queue?limit=50"),
       ]);
       const [
         readyResponse,
@@ -112,6 +167,8 @@ function App() {
         eventsResponse,
         aiStatusResponse,
         investigationsResponse,
+        capabilitiesResponse,
+        approvalQueueResponse,
       ] = responses;
       const readyBody = (await readyResponse.json()) as Readiness;
       for (const response of responses.slice(1)) {
@@ -127,6 +184,8 @@ function App() {
       setEvents((await eventsResponse.json()) as SecurityEvent[]);
       setAIStatus((await aiStatusResponse.json()) as AIStatus);
       setInvestigations((await investigationsResponse.json()) as Investigation[]);
+      setCapabilities((await capabilitiesResponse.json()) as Capability[]);
+      setApprovalQueue((await approvalQueueResponse.json()) as ApprovalQueueItem[]);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Control plane unavailable");
@@ -153,6 +212,40 @@ function App() {
     }
   }
 
+  async function decideProposal(proposal: ActionProposal, decision: "approve" | "reject") {
+    try {
+      const response = await fetch(`/api/v1/action-proposals/${proposal.id}/approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision }),
+      });
+      if (!response.ok) {
+        const body = (await response.json()) as { detail?: string };
+        throw new Error(body.detail ?? `approval decision failed: ${response.status}`);
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Approval decision failed");
+    }
+  }
+
+  function principalCanApprove(proposal: ActionProposal): boolean {
+    const roles = new Set(principal?.roles ?? []);
+    return proposal.required_roles.every((requiredRole) => {
+      if (requiredRole === "operator_approver") {
+        return (
+          roles.has("operator_approver") ||
+          roles.has("security_approver") ||
+          roles.has("platform_approver")
+        );
+      }
+      if (requiredRole === "security_approver") {
+        return roles.has("security_approver") || roles.has("platform_approver");
+      }
+      return roles.has(requiredRole);
+    });
+  }
+
   useEffect(() => {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 10_000);
@@ -173,8 +266,8 @@ function App() {
           <p className="eyebrow">AUTONOMOUS INFRASTRUCTURE OPERATIONS</p>
           <h1>Agentic Network Management</h1>
           <p className="subtitle">
-            Reconcile infrastructure state, normalize security evidence and build explainable
-            incidents before granting any write authority.
+            Reconcile infrastructure state, normalize security evidence, investigate incidents and
+            authorize typed remediation proposals without giving AI execution authority.
           </p>
         </div>
         <div className={`state ${readiness?.ready ? "ok" : "down"}`}>
@@ -241,6 +334,87 @@ function App() {
           ))}
           {incidents.length === 0 && (
             <article className="card"><p>No correlated incidents yet.</p></article>
+          )}
+        </div>
+      </section>
+
+      <section>
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">POLICY-GATED AUTHORIZATION</p>
+            <h2>{approvalQueue.length} proposals awaiting approval</h2>
+          </div>
+          <span className="pill degraded">no executor in Phase 5</span>
+        </div>
+        <div className="review-list">
+          {approvalQueue.map(({ proposal, approvals }) => {
+            const capability = capabilities.find(
+              (item) =>
+                item.capability_id === proposal.capability &&
+                item.version === proposal.capability_version,
+            );
+            const mayApprove = principalCanApprove(proposal);
+            return (
+              <article key={proposal.id} className="card review-card">
+                <div>
+                  <div className="card-title">
+                    <h3>{proposal.capability}</h3>
+                    <span
+                      className={`pill ${
+                        (capability?.risk ?? 5) >= 4
+                          ? "down"
+                          : (capability?.risk ?? 5) >= 2
+                            ? "degraded"
+                            : "ok"
+                      }`}
+                    >
+                      risk {capability?.risk ?? "?"}
+                    </span>
+                  </div>
+                  <p>
+                    Target {proposal.target_asset_id.slice(0, 8)} · incident{" "}
+                    {proposal.incident_id.slice(0, 8)} · revision {proposal.revision}
+                  </p>
+                  <p>{proposal.reason}</p>
+                  <p>
+                    Policy: {proposal.policy_reasons.join(" · ")} · requires{" "}
+                    {proposal.required_roles.join(", ") || "no human role"}
+                  </p>
+                  <p>
+                    Policy {proposal.policy_version} · proposal {proposal.proposal_digest.slice(0, 12)}…
+                    · implementation {proposal.implementation_digest.slice(0, 12)}…
+                  </p>
+                  <p className="protected">
+                    AUTHORIZED means authorization state only. Phase 5 cannot execute this action.
+                  </p>
+                  {approvals.length > 0 && (
+                    <p>{approvals.length} prior decision record(s) retained for audit.</p>
+                  )}
+                  {!mayApprove && (
+                    <p className="protected">
+                      Your current roles do not satisfy this proposal&apos;s approval requirement.
+                    </p>
+                  )}
+                </div>
+                <div className="actions">
+                  <button disabled={!mayApprove} onClick={() => void decideProposal(proposal, "approve")}>
+                    Approve
+                  </button>
+                  <button disabled={!mayApprove} onClick={() => void decideProposal(proposal, "reject")}>
+                    Reject
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+          {approvalQueue.length === 0 && (
+            <article className="card">
+              <p>No policy-gated proposals currently require a human decision.</p>
+              <p className="protected">
+                The capability catalogue contains {capabilities.length} enabled typed operations;
+                none has an execution path in Phase 5.
+              </p>
+            </article>
           )}
         </div>
       </section>
@@ -410,9 +584,9 @@ function App() {
       </section>
 
       <footer>
-        Phase 4 AI is optional and read-only. Deterministic monitoring continues without a model;
-        evidence is minimized before reasoning; models have no remediation, approval, secret or
-        managed-network authority.
+        Phase 5 adds typed proposal and approval state only. OPA evaluates authorization and human
+        decisions bind exact digests; there is no executor, infrastructure write worker or
+        AI-controlled remediation path.
       </footer>
     </main>
   );

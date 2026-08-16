@@ -1,0 +1,26 @@
+{
+  "id": "windows.restart_service",
+  "version": "1.0.0",
+  "description": "Restart a specifically named approved Windows service on one managed asset.",
+  "risk": 2,
+  "write": true,
+  "reversible": false,
+  "lifecycle": "ENABLED",
+  "parameters_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["service_name"],
+    "properties": {
+      "service_name": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_. -]+$"
+      }
+    }
+  },
+  "execution": {"adapter": "reserved_phase6", "implementation": "capability:windows.restart_service"},
+  "verification": {"strategy": "service_health", "timeout_seconds": 120},
+  "rollback": null
+}

@@ -23,8 +23,13 @@ class Settings(BaseSettings):
     openbao_url: str = "http://openbao:8200"
     openbao_token_file: Path = Path("/run/secrets/openbao_token")
     ui_origin: str = "http://localhost:8080"
+    schema_root: Path = Path("schemas")
     opa_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
     dependency_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
+
+    # Autonomy Level 2 is the safe default: write proposals require human approval.
+    # Phase 5 never executes a proposal regardless of this value.
+    autonomy_level: int = Field(default=2, ge=0, le=4)
 
     # AI is optional and disabled by default. Monitoring and deterministic
     # incident workflows must not depend on any model provider.
