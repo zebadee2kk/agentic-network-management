@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from anm.action_models import ActionApproval, ActionProposal, CapabilityDefinition
+from anm.action_models import ActionProposal, CapabilityDefinition
 from anm.action_schemas import ActionProposalCreate, ActionProposalRevision
 from anm.auth import Principal
 from anm.config import Settings
@@ -386,4 +386,5 @@ def test_builtin_catalogue_uses_only_reviewed_adapters_and_no_generic_shell_capa
         assert adapter in allowed_adapters
         if adapter != "reserved_phase6":
             assert definition.manifest.get("artifacts")
-            assert definition.manifest["execution"]["implementation"] in definition.manifest["artifacts"]
+            implementation = definition.manifest["execution"]["implementation"]
+            assert implementation in definition.manifest["artifacts"]
