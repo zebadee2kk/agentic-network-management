@@ -105,6 +105,10 @@ class ExecutionResponse(BaseModel):
     capability: str
     capability_version: str
     target_asset_id: uuid.UUID
+    parameters: dict[str, Any]
+    incident_id: uuid.UUID
+    evidence_ids: list[str]
+    confidence: float
     proposal_digest: str
     capability_digest: str
     implementation_digest: str
