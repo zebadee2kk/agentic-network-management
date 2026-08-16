@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from anm.config import get_settings
 from anm.db import SessionLocal
 from anm.phase2_routes import router as phase2_router
+from anm.phase3_routes import router as phase3_router
 from anm.routes import router
 from anm.services.events import EventBus
 from anm.services.policy import PolicyClient
@@ -36,7 +37,7 @@ async def lifespan(app: FastAPI):
 settings = get_settings()
 app = FastAPI(
     title="Agentic Network Management",
-    version="0.2.0",
+    version="0.3.0",
     description="Policy-gated autonomous infrastructure and security operations control plane.",
     lifespan=lifespan,
 )
@@ -61,3 +62,4 @@ async def correlation_id_middleware(request: Request, call_next):
 
 app.include_router(router)
 app.include_router(phase2_router)
+app.include_router(phase3_router)
