@@ -17,7 +17,9 @@ class OpenBaoClient:
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.get(f"{self._url}/v1/sys/health")
-                return response.status_code in {200, 429, 472, 473, 501, 503}
+                # Active/standby/replication states may serve or forward requests.
+                # Uninitialized (501) and sealed (503) are deliberately not ready.
+                return response.status_code in {200, 429, 472, 473}
         except httpx.HTTPError:
             return False
 
