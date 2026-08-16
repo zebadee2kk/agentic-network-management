@@ -174,9 +174,11 @@ async def create_execution(
     adapter = str(capability.manifest.get("execution", {}).get("adapter", ""))
     binding = _binding_for(db, asset_id=asset.id, adapter=adapter)
     _validate_capability_prechecks(proposal, capability, binding)
-    if binding.credential_reference_id is not None:
-        if db.get(CredentialReference, binding.credential_reference_id) is None:
-            raise ExecutionValidationError("credential reference no longer exists")
+    if (
+        binding.credential_reference_id is not None
+        and db.get(CredentialReference, binding.credential_reference_id) is None
+    ):
+        raise ExecutionValidationError("credential reference no longer exists")
 
     key = _idempotency_key(proposal)
     existing = db.scalar(select(ActionExecution).where(ActionExecution.idempotency_key == key))
