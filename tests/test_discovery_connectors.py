@@ -6,6 +6,7 @@ import pytest
 from anm.connectors.base import ConnectorError
 from anm.connectors.librenms import LibreNMSConnector
 from anm.connectors.netbox import NetBoxConnector
+from anm.services.discovery import DiscoveryConfigurationError, validate_connector_endpoint
 
 
 @pytest.mark.asyncio
@@ -148,3 +149,17 @@ async def test_authentication_error_does_not_echo_token() -> None:
         await connector.discover([])
     assert exc.value.category == "authentication_failed"
     assert token not in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_connector_endpoint_must_be_inside_explicit_egress_cidr() -> None:
+    addresses = await validate_connector_endpoint(
+        "https://10.10.0.5",
+        ["10.10.0.0/24"],
+    )
+    assert addresses == {"10.10.0.5"}
+
+    with pytest.raises(DiscoveryConfigurationError):
+        await validate_connector_endpoint("https://10.20.0.5", ["10.10.0.0/24"])
+    with pytest.raises(DiscoveryConfigurationError):
+        await validate_connector_endpoint("https://10.10.0.5", [])
