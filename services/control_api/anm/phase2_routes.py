@@ -37,7 +37,11 @@ from anm.schemas import (
 )
 from anm.services.audit import AuditService
 from anm.services.discovery import DiscoveryConfigurationError, execute_discovery_run
-from anm.services.reconciliation import ImmutableIdentityConflict, rebuild_topology, resolve_candidate
+from anm.services.reconciliation import (
+    ImmutableIdentityConflict,
+    rebuild_topology,
+    resolve_candidate,
+)
 from anm.services.secrets import OpenBaoClient
 from anm.state import get_openbao_client
 
@@ -97,7 +101,10 @@ def create_connector(
     scope = db.get(ManagedScope, request.scope_id)
     if scope is None:
         raise HTTPException(status_code=404, detail="managed scope not found")
-    if scope.allowed_connector_types and request.connector_type not in scope.allowed_connector_types:
+    if (
+        scope.allowed_connector_types
+        and request.connector_type not in scope.allowed_connector_types
+    ):
         raise HTTPException(status_code=400, detail="connector type not allowed by scope")
     connector = ConnectorInstance(**request.model_dump(), status="unknown")
     db.add(connector)
@@ -295,7 +302,9 @@ def list_reconciliation_candidates(
     candidate_status: str | None = None,
 ) -> list[ReconciliationCandidate]:
     del principal
-    statement = select(ReconciliationCandidate).order_by(ReconciliationCandidate.created_at.desc())
+    statement = select(ReconciliationCandidate).order_by(
+        ReconciliationCandidate.created_at.desc()
+    )
     if candidate_status:
         statement = statement.where(ReconciliationCandidate.status == candidate_status)
     return list(db.scalars(statement.limit(500)))
