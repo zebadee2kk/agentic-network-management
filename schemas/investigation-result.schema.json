@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-network-management.local/schemas/investigation-result.schema.json",
+  "title": "AI Investigation Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "role",
+    "summary",
+    "confidence",
+    "findings",
+    "hypotheses",
+    "missing_evidence",
+    "recommended_next_queries"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0.0" },
+    "role": {
+      "type": "string",
+      "enum": ["soc_analyst", "network_analyst", "supervisor"]
+    },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "findings": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "hypotheses": {
+      "type": "array",
+      "maxItems": 16,
+      "items": { "$ref": "#/$defs/hypothesis" }
+    },
+    "missing_evidence": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "type": "string", "maxLength": 2048 }
+    },
+    "recommended_next_queries": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "type": "string", "maxLength": 2048 }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement", "confidence", "evidence_ids"],
+      "properties": {
+        "statement": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "type": "string", "format": "uuid" }
+        }
+      }
+    },
+    "hypothesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement", "rationale", "confidence", "evidence_ids"],
+      "properties": {
+        "statement": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "rationale": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "type": "string", "format": "uuid" }
+        }
+      }
+    }
+  }
+}

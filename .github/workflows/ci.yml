@@ -79,9 +79,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build and start appliance
         run: docker compose up -d --build
-      - name: Require worker health
+      - name: Require worker and relay health
         run: |
-          for worker in discovery-worker telemetry-worker; do
+          for worker in discovery-worker telemetry-worker ai-worker model-relay; do
             worker_id=$(docker compose ps -q "$worker")
             test -n "$worker_id"
             healthy=false
@@ -104,13 +104,14 @@ jobs:
               exit 1
             fi
           done
-      - name: Require end-to-end readiness
+      - name: Require end-to-end readiness with AI disabled
         run: |
           for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error \
-              http://127.0.0.1:8080/health/ready \
-              --output /tmp/anm-readiness.json; then
+            if curl --fail --silent --show-error               http://127.0.0.1:8080/health/ready               --output /tmp/anm-readiness.json; then
               cat /tmp/anm-readiness.json
+              curl --fail --silent --show-error                 http://127.0.0.1:8080/api/v1/ai/status                 --output /tmp/anm-ai-status.json
+              cat /tmp/anm-ai-status.json
+              grep -q '"enabled":false' /tmp/anm-ai-status.json
               exit 0
             fi
             sleep 2

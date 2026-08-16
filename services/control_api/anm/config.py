@@ -26,9 +26,26 @@ class Settings(BaseSettings):
     opa_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
     dependency_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
 
+    # AI is optional and disabled by default. Monitoring and deterministic
+    # incident workflows must not depend on any model provider.
+    ai_enabled: bool = False
+    model_relay_url: str = "http://model-relay:8090"
+    model_timeout_seconds: float = Field(default=45.0, gt=0, le=180)
+    ai_max_evidence_events: int = Field(default=50, ge=1, le=250)
+    ai_max_context_chars: int = Field(default=40000, ge=2000, le=200000)
+    ai_local_provider_hosts: str = "ollama,litellm"
+
     @property
     def is_production(self) -> bool:
         return self.env.lower() == "production"
+
+    @property
+    def local_provider_hosts(self) -> set[str]:
+        return {
+            item.strip().lower()
+            for item in self.ai_local_provider_hosts.split(",")
+            if item.strip()
+        }
 
 
 @lru_cache
