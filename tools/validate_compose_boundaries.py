@@ -34,14 +34,31 @@ def main() -> None:
     required_control_networks = {"api", "control", "data", "secrets"}
     if not required_control_networks.issubset(control_networks):
         fail("control-api is missing a required internal network")
+    if "discovery" in control_networks:
+        fail("control-api must not have discovery egress")
 
-    for protected_service in ("nats", "opa", "postgres", "openbao"):
+    worker_networks = network_names(services["discovery-worker"])
+    required_worker_networks = {"control", "data", "secrets", "discovery"}
+    if worker_networks != required_worker_networks:
+        fail("discovery-worker must attach only to control, data, secrets and discovery")
+    if "api" in worker_networks or "edge" in worker_networks:
+        fail("discovery-worker must not share browser-facing networks")
+
+    discovery_members = {
+        name for name, service in services.items() if "discovery" in network_names(service)
+    }
+    if discovery_members != {"discovery-worker"}:
+        fail(f"only discovery-worker may use discovery egress, got {sorted(discovery_members)}")
+
+    for protected_service in ("nats", "opa", "postgres", "openbao", "discovery-worker"):
         if network_names(services["ui"]) & network_names(services[protected_service]):
             fail(f"ui must not share a network with {protected_service}")
 
     for internal_network in ("api", "control", "data", "secrets"):
         if not networks[internal_network].get("internal", False):
             fail(f"{internal_network} must be internal")
+    if networks["discovery"].get("internal", False):
+        fail("discovery network must provide egress for scoped connector reads")
 
     print("compose trust boundaries validated")
 

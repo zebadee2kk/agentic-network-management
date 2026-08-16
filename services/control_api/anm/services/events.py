@@ -45,6 +45,8 @@ class EventBus:
         streams = {
             "SYSTEM": ["system.>"],
             "AUDIT": ["audit.>"],
+            "OBSERVATIONS": ["discovery.>", "asset.observed.>", "topology.observed.>"],
+            "DOMAIN_EVENTS": ["asset.changed.>", "topology.changed.>", "finding.>", "incident.>"],
         }
         for name, subjects in streams.items():
             try:
