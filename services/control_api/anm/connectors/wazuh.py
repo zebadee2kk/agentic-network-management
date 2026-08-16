@@ -76,11 +76,16 @@ class WazuhIndexerConnector:
                 )
             if response.status_code in {401, 403}:
                 category = (
-                    "authentication_failed" if response.status_code == 401 else "authorization_failed"
+                    "authentication_failed"
+                    if response.status_code == 401
+                    else "authorization_failed"
                 )
                 raise WazuhConnectorError(category, "Wazuh indexer rejected read credentials")
             if response.status_code == 429:
-                raise WazuhConnectorError("rate_limited", "Wazuh indexer rate limited alert polling")
+                raise WazuhConnectorError(
+                    "rate_limited",
+                    "Wazuh indexer rate limited alert polling",
+                )
             response.raise_for_status()
             payload = response.json()
             hits = payload["hits"]["hits"]
