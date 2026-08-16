@@ -80,7 +80,11 @@ class NetBoxConnector(ReadOnlyDiscoveryConnector):
         role_slug = cls._nested_value(role, "slug") or cls._nested_value(role, "name")
         protected_role = config.get("protected_role_map", {}).get(str(role_slug))
         protected_roles = [str(protected_role)] if protected_role else []
-        custom_fields = device.get("custom_fields") if isinstance(device.get("custom_fields"), dict) else {}
+        custom_fields = (
+            device.get("custom_fields")
+            if isinstance(device.get("custom_fields"), dict)
+            else {}
+        )
         zone_field = str(config.get("network_zone_field", "anm_network_zone"))
         network_zone = custom_fields.get(zone_field)
 
@@ -125,7 +129,10 @@ class NetBoxConnector(ReadOnlyDiscoveryConnector):
                 payload = response.json()
                 devices = payload["results"]
             except (ValueError, KeyError, TypeError) as exc:
-                raise ConnectorError("invalid_response", "NetBox returned invalid device data") from exc
+                raise ConnectorError(
+                    "invalid_response",
+                    "NetBox returned invalid device data",
+                ) from exc
             if not isinstance(devices, list):
                 raise ConnectorError("invalid_response", "NetBox device results were not a list")
             for device in devices:
