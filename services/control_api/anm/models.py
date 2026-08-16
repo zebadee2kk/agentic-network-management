@@ -112,6 +112,7 @@ class ManagedScope(Base):
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     cidrs: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    connector_cidrs: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     allowed_connector_types: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     max_requests_per_minute: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
