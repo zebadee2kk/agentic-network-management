@@ -17,6 +17,7 @@ class CapabilityResponse(BaseModel):
     reversible: bool
     lifecycle: str
     parameter_schema: dict[str, Any]
+    manifest: dict[str, Any]
     manifest_digest: str
     implementation_digest: str
     capability_digest: str
