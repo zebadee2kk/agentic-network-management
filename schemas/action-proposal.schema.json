@@ -7,21 +7,29 @@
   "required": [
     "proposal_id",
     "schema_version",
+    "revision",
     "capability",
     "capability_version",
+    "capability_digest",
+    "implementation_digest",
     "target_asset_id",
     "parameters",
     "reason",
     "incident_id",
     "evidence_ids",
     "confidence",
-    "requested_by"
+    "requested_by",
+    "proposal_digest",
+    "created_at"
   ],
   "properties": {
     "proposal_id": { "type": "string", "format": "uuid" },
     "schema_version": { "type": "string", "const": "1.0.0" },
+    "revision": { "type": "integer", "minimum": 1 },
     "capability": { "type": "string", "pattern": "^[a-z0-9_.-]{1,128}$" },
     "capability_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "capability_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "implementation_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "target_asset_id": { "type": "string", "format": "uuid" },
     "parameters": { "type": "object", "maxProperties": 64, "additionalProperties": true },
     "reason": { "type": "string", "minLength": 1, "maxLength": 4096 },
@@ -37,12 +45,19 @@
     "requested_by": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "id"],
+      "required": ["type", "id", "roles"],
       "properties": {
         "type": { "type": "string", "enum": ["user", "agent", "system"] },
-        "id": { "type": "string", "minLength": 1, "maxLength": 256 }
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "roles": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
       }
     },
+    "proposal_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "created_at": { "type": "string", "format": "date-time" }
   }
 }

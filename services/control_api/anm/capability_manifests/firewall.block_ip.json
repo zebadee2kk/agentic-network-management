@@ -1,0 +1,31 @@
+{
+  "id": "firewall.block_ip",
+  "version": "1.0.0",
+  "description": "Block one explicitly supplied IP address using a reviewed firewall adapter and bounded duration.",
+  "risk": 2,
+  "write": true,
+  "reversible": true,
+  "lifecycle": "ENABLED",
+  "parameters_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["address"],
+    "properties": {
+      "address": {
+        "oneOf": [
+          {"type": "string", "format": "ipv4"},
+          {"type": "string", "format": "ipv6"}
+        ]
+      },
+      "duration_minutes": {
+        "type": "integer",
+        "minimum": 5,
+        "maximum": 1440
+      }
+    }
+  },
+  "execution": {"adapter": "reserved_phase6", "implementation": "capability:firewall.block_ip"},
+  "verification": {"strategy": "firewall_readback_and_flow_observation", "timeout_seconds": 180},
+  "rollback": {"capability": "firewall.unblock_ip", "version": "1.0.0"}
+}

@@ -1,0 +1,23 @@
+{
+  "id": "endpoint.security_scan",
+  "version": "1.0.0",
+  "description": "Request an approved endpoint security scan without changing endpoint configuration.",
+  "risk": 1,
+  "write": false,
+  "reversible": false,
+  "lifecycle": "ENABLED",
+  "parameters_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "scan_profile": {
+        "type": "string",
+        "enum": ["quick", "standard"]
+      }
+    }
+  },
+  "execution": {"adapter": "reserved_phase6", "implementation": "capability:endpoint.security_scan"},
+  "verification": {"strategy": "scan_result_received", "timeout_seconds": 900},
+  "rollback": null
+}

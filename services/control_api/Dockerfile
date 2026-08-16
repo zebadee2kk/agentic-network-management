@@ -11,6 +11,7 @@ RUN useradd --create-home --uid 10001 anm
 COPY pyproject.toml /app/pyproject.toml
 COPY services/control_api /app/services/control_api
 COPY migrations /app/migrations
+COPY schemas /app/schemas
 COPY alembic.ini /app/alembic.ini
 
 RUN pip install --upgrade pip && pip install .
