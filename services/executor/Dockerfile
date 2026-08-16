@@ -16,6 +16,7 @@ RUN apt-get update \
 
 COPY pyproject.toml /app/pyproject.toml
 COPY services/control_api /app/services/control_api
+COPY schemas /app/schemas
 
 RUN pip install --upgrade pip && pip install '.[executor]'
 
