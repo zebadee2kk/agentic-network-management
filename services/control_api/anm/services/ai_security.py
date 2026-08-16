@@ -37,6 +37,8 @@ PRIVATE_KEY = re.compile(
 )
 OPENBAO_REFERENCE = re.compile(r"openbao://[^\s\"']+")
 
+# Phase 4 deliberately excludes raw command lines, full logs, HTTP bodies/headers,
+# arbitrary protocol dictionaries and other high-entropy source text from model context.
 SOC_ATTRIBUTE_KEYS = {
     "agent_id",
     "agent_name",
@@ -48,10 +50,8 @@ SOC_ATTRIBUTE_KEYS = {
     "dest_ip",
     "src_user",
     "dest_user",
-    "command_line",
-    "full_log",
 }
-NETWORK_ATTRIBUTE_KEYS = {
+NETWORK_SCALAR_KEYS = {
     "flow_id",
     "src_ip",
     "src_port",
@@ -60,11 +60,13 @@ NETWORK_ATTRIBUTE_KEYS = {
     "proto",
     "app_proto",
     "direction",
-    "alert",
-    "dns",
-    "tls",
-    "http",
-    "anomaly",
+}
+NETWORK_NESTED_KEYS: dict[str, set[str]] = {
+    "alert": {"signature_id", "signature", "category", "severity"},
+    "dns": {"type", "rrname", "rrtype", "rcode"},
+    "tls": {"sni", "version", "subject", "issuer", "fingerprint"},
+    "http": {"hostname", "http_method", "status", "protocol"},
+    "anomaly": {"event", "layer"},
 }
 
 
@@ -99,13 +101,36 @@ def redact_for_model(value: Any, *, depth: int = 0) -> Any:
     return _redact_string(str(value))
 
 
-def _event_view(event: CanonicalEvent, role: str) -> dict[str, Any]:
-    allowed = SOC_ATTRIBUTE_KEYS if role == "soc_analyst" else NETWORK_ATTRIBUTE_KEYS
-    attributes = {
+def _soc_attributes(event: CanonicalEvent) -> dict[str, Any]:
+    return {
         key: value
         for key, value in event.attributes.items()
-        if key in allowed and value is not None
+        if key in SOC_ATTRIBUTE_KEYS and value is not None
     }
+
+
+def _network_attributes(event: CanonicalEvent) -> dict[str, Any]:
+    attributes: dict[str, Any] = {
+        key: value
+        for key, value in event.attributes.items()
+        if key in NETWORK_SCALAR_KEYS and value is not None
+    }
+    for container, allowed_keys in NETWORK_NESTED_KEYS.items():
+        raw = event.attributes.get(container)
+        if not isinstance(raw, dict):
+            continue
+        selected = {
+            key: value
+            for key, value in raw.items()
+            if key in allowed_keys and value is not None
+        }
+        if selected:
+            attributes[container] = selected
+    return attributes
+
+
+def _event_view(event: CanonicalEvent, role: str) -> dict[str, Any]:
+    attributes = _soc_attributes(event) if role == "soc_analyst" else _network_attributes(event)
     return redact_for_model(
         {
             "evidence_id": str(event.id),
@@ -118,7 +143,7 @@ def _event_view(event: CanonicalEvent, role: str) -> dict[str, Any]:
             "confidence": event.confidence,
             "classifications": event.classifications,
             "trust": "untrusted_evidence",
-            "summary": event.summary,
+            "label": f"{event.event_type} from {event.source_connector}",
             "data": attributes,
         }
     )
@@ -154,15 +179,13 @@ def build_evidence_bundle(
             "state": incident.state,
             "severity": incident.severity,
             "confidence": incident.confidence,
-            "summary": _redact_string(incident.summary),
         },
         "assets": [
             {
                 "id": str(asset.id),
-                "display_name": _redact_string(asset.display_name, max_length=256),
                 "asset_type": asset.asset_type,
                 "criticality": asset.criticality,
-                "network_zone": asset.network_zone,
+                "network_zone": redact_for_model(asset.network_zone),
                 "protected_roles": asset.protected_roles,
             }
             for asset in assets
