@@ -26,7 +26,9 @@ class TelemetrySource(Base):
     config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     cursor: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="unknown", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
@@ -41,7 +43,9 @@ class CanonicalEvent(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     schema_version: Mapped[str] = mapped_column(String(16), default="1.0.0", nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
     source_connector: Mapped[str] = mapped_column(String(64), nullable=False)
     source_instance: Mapped[str] = mapped_column(String(128), nullable=False)
     source_event_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
@@ -72,7 +76,9 @@ class RawEventReference(Base):
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     source_pointer: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
 
 
 class FeatureDefinition(Base):
@@ -115,7 +121,9 @@ class Baseline(Base):
     mean: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     m2: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     algorithm_version: Mapped[str] = mapped_column(String(16), default="1.0.0", nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
 
 
 class AnomalyFinding(Base):
@@ -132,7 +140,9 @@ class AnomalyFinding(Base):
     score: Mapped[float] = mapped_column(Float, nullable=False)
     threshold: Mapped[float] = mapped_column(Float, nullable=False)
     reasons: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
 
 
 class Incident(Base):
@@ -144,8 +154,12 @@ class Incident(Base):
     severity: Mapped[int] = mapped_column(Integer, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     summary: Mapped[str] = mapped_column(String(2048), nullable=False)
-    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    last_activity_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -180,7 +194,9 @@ class IncidentEvidence(Base):
         Uuid(as_uuid=True), ForeignKey("canonical_events.id"), nullable=False
     )
     correlation_reasons: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
-    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
 
 
 class IncidentTimeline(Base):
