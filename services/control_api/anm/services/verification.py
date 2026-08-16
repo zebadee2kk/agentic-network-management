@@ -70,11 +70,11 @@ async def _reference_observer(
                     "desired": desired,
                 }
             if execution.capability in {"firewall.block_ip", "firewall.unblock_ip"}:
-                address = execution.executor_result.get("address")
+                address = execution.parameters.get("address")
                 if not isinstance(address, str):
                     return False, {
                         "strategy": "reference_firewall_observer",
-                        "reason": "execution_result_missing_address",
+                        "reason": "execution_snapshot_missing_address",
                     }
                 desired = execution.capability == "firewall.block_ip"
                 encoded_address = quote(address, safe="")
