@@ -9,14 +9,13 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     String,
-    UniqueConstraint,
     Uuid,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from anm.db import Base
 from anm.models import utcnow
-
 
 EXECUTION_STATES = (
     "QUEUED",
