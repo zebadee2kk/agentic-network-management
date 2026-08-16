@@ -1,5 +1,8 @@
 from datetime import UTC, datetime
 
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.orm import Session
+
 from anm.db import Base
 from anm.models import (
     Asset,
@@ -13,8 +16,6 @@ from anm.models import (
 from anm.schemas import ObservationCreate, ObservationIdentifier, TopologyHint
 from anm.services.discovery import persist_observation
 from anm.services.reconciliation import rebuild_topology
-from sqlalchemy import create_engine, func, select
-from sqlalchemy.orm import Session
 
 
 def make_db() -> Session:
