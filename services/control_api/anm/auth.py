@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Annotated, Protocol
 
 from fastapi import Depends
 
@@ -37,7 +37,10 @@ class LocalAuthProvider:
         return self._principal
 
 
-def get_principal(settings: Settings = Depends(get_settings)) -> Principal:
+RuntimeSettings = Annotated[Settings, Depends(get_settings)]
+
+
+def get_principal(settings: RuntimeSettings) -> Principal:
     if settings.auth_mode != "local":
         raise RuntimeError(f"unsupported auth mode in Phase 1: {settings.auth_mode}")
     return LocalAuthProvider(settings).authenticate()
