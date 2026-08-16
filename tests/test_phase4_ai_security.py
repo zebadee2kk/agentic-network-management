@@ -148,6 +148,12 @@ class FakeGateway:
         )
 
 
+class FailingGateway:
+    async def generate(self, request: ModelRequest) -> ModelResponse:
+        del request
+        raise RuntimeError("provider exploded with sensitive internal detail")
+
+
 def add_provider_and_run(db: Session, incident: Incident) -> tuple[ModelProvider, InvestigationRun]:
     provider = ModelProvider(
         name="test-provider",
@@ -270,6 +276,33 @@ async def test_invalid_model_output_is_rejected_without_state_or_hypothesis_side
     invocation = db.scalar(select(ModelInvocation))
     assert invocation is not None
     assert invocation.status == "INVALID_OUTPUT"
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_is_audited_without_exception_or_state_leakage() -> None:
+    db = make_db()
+    incident, _evidence_id = seed_incident(db)
+    _provider, run = add_provider_and_run(db, incident)
+
+    result = await execute_investigation(
+        db,
+        run=run,
+        settings=Settings(ai_enabled=True),
+        gateway=FailingGateway(),
+    )
+
+    assert result.status == "FAILED"
+    assert result.error_category == "model_provider_error"
+    assert result.error_detail == "model provider invocation failed"
+    assert incident.state == "NEW"
+    invocation = db.scalar(select(ModelInvocation))
+    assert invocation is not None
+    assert invocation.status == "FAILED"
+    assert invocation.response_sha256 is None
+    step = db.scalar(select(AgentStep))
+    assert step is not None
+    assert step.status == "FAILED"
+    assert "sensitive internal detail" not in (step.error_detail or "")
 
 
 def test_ai_disabled_does_not_affect_deterministic_monitoring() -> None:

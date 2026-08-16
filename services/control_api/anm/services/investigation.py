@@ -91,6 +91,28 @@ def _specialist_roles(db: Session, incident_id: uuid.UUID) -> list[str]:
     return roles
 
 
+def _failed_invocation(
+    *,
+    run: InvestigationRun,
+    step: AgentStep,
+    provider: ModelProvider,
+    request_hash: str,
+) -> ModelInvocation:
+    return ModelInvocation(
+        investigation_run_id=run.id,
+        agent_step_id=step.id,
+        provider_id=provider.id,
+        model=provider.model,
+        status="FAILED",
+        request_sha256=request_hash,
+        response_sha256=None,
+        input_tokens=0,
+        output_tokens=0,
+        estimated_cost_usd=0.0,
+        latency_ms=0,
+    )
+
+
 async def _run_agent(
     db: Session,
     *,
@@ -133,15 +155,29 @@ async def _run_agent(
         step.completed_at = utcnow()
         raise InvestigationError("budget_exhausted", step.error_detail)
 
-    response = await gateway.generate(
-        ModelRequest(
-            provider_id=provider.id,
-            agent_role=role,
-            messages=messages,
-            response_schema=InvestigationOutput.model_json_schema(),
-            max_output_tokens=int(provider.config.get("max_output_tokens", 1600)),
-        )
+    request = ModelRequest(
+        provider_id=provider.id,
+        agent_role=role,
+        messages=messages,
+        response_schema=InvestigationOutput.model_json_schema(),
+        max_output_tokens=int(provider.config.get("max_output_tokens", 1600)),
     )
+    try:
+        response = await gateway.generate(request)
+    except Exception as exc:
+        db.add(
+            _failed_invocation(
+                run=run,
+                step=step,
+                provider=provider,
+                request_hash=request_hash,
+            )
+        )
+        step.status = "FAILED"
+        step.error_detail = "model provider invocation failed"
+        step.completed_at = utcnow()
+        raise InvestigationError("model_provider_error", step.error_detail) from exc
+
     response_hash = _hash_text(response.content)
     cost = _estimate_cost(provider, response.input_tokens, response.output_tokens)
     invocation = ModelInvocation(
@@ -319,8 +355,8 @@ async def execute_investigation(
         db.refresh(run)
         return run
     except InvestigationError as exc:
-        # Validation/policy-style failures do not invalidate the SQL transaction.
-        # Commit the failed step/invocation metadata so the causal chain is auditable.
+        # Validation, budget and provider failures leave the transaction usable.
+        # Commit redacted failure metadata so the causal chain remains auditable.
         current = db.get(InvestigationRun, run.id)
         if current is None:
             raise
