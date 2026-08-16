@@ -9,8 +9,8 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     String,
-    Uuid,
     UniqueConstraint,
+    Uuid,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
