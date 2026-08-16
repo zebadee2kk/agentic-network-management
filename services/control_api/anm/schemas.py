@@ -2,6 +2,7 @@ import ipaddress
 import uuid
 from datetime import datetime
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -28,6 +29,15 @@ PROTECTED_ROLES = {
     "platform_control",
     "hypervisor",
     "critical_application",
+}
+FORBIDDEN_CONNECTOR_HOSTS = {
+    "localhost",
+    "control-api",
+    "ui",
+    "nats",
+    "opa",
+    "openbao",
+    "postgres",
 }
 
 
@@ -119,11 +129,12 @@ class ManagedScopeCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=128)
     cidrs: list[str] = Field(default_factory=list, max_length=128)
+    connector_cidrs: list[str] = Field(default_factory=list, max_length=64)
     allowed_connector_types: list[Literal["netbox", "librenms"]] = Field(default_factory=list)
     max_requests_per_minute: int = Field(default=30, ge=1, le=600)
     enabled: bool = True
 
-    @field_validator("cidrs")
+    @field_validator("cidrs", "connector_cidrs")
     @classmethod
     def validate_cidrs(cls, values: list[str]) -> list[str]:
         return [str(ipaddress.ip_network(value, strict=False)) for value in values]
@@ -158,8 +169,28 @@ class ConnectorInstanceCreate(BaseModel):
     @field_validator("base_url")
     @classmethod
     def validate_base_url(cls, value: str) -> str:
-        if not value.startswith(("http://", "https://")):
-            raise ValueError("connector base_url must use http:// or https://")
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("connector base_url must use http:// or https:// with a host")
+        if parsed.username or parsed.password:
+            raise ValueError("connector base_url must not contain credentials")
+        if parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
+            raise ValueError("connector base_url must be an origin without path, query, or fragment")
+        hostname = parsed.hostname.lower().rstrip(".")
+        if hostname in FORBIDDEN_CONNECTOR_HOSTS or hostname.endswith(".localhost"):
+            raise ValueError("connector base_url targets a protected platform host")
+        try:
+            address = ipaddress.ip_address(hostname)
+        except ValueError:
+            address = None
+        if address and (
+            address.is_loopback
+            or address.is_link_local
+            or address.is_multicast
+            or address.is_unspecified
+            or address.is_reserved
+        ):
+            raise ValueError("connector base_url targets a prohibited address class")
         return value.rstrip("/")
 
 
