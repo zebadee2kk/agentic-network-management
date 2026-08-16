@@ -27,12 +27,15 @@ class Settings(BaseSettings):
     opa_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
     dependency_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
 
-    # Autonomy Level 2 is the safe default: write proposals require human approval.
-    # Phase 5 never executes a proposal regardless of this value.
+    # Level 2 remains the safe default: write proposals require human approval.
     autonomy_level: int = Field(default=2, ge=0, le=4)
 
+    # A RUNNING execution left behind by a dead worker is never retried. After this
+    # interval a replacement worker marks it AMBIGUOUS and requests verification.
+    execution_stale_seconds: int = Field(default=300, ge=30, le=86400)
+
     # AI is optional and disabled by default. Monitoring and deterministic
-    # incident workflows must not depend on any model provider.
+    # incident/execution workflows must not depend on any model provider.
     ai_enabled: bool = False
     model_relay_url: str = "http://model-relay:8090"
     model_timeout_seconds: float = Field(default=45.0, gt=0, le=180)

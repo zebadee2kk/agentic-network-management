@@ -10,9 +10,11 @@ from anm.phase2_routes import router as phase2_router
 from anm.phase3_routes import router as phase3_router
 from anm.phase4_routes import router as phase4_router
 from anm.phase5_routes import router as phase5_router
+from anm.phase6_routes import router as phase6_router
 from anm.routes import router
 from anm.services.capabilities import sync_builtin_capabilities
 from anm.services.events import EventBus
+from anm.services.execution import ensure_execution_control
 from anm.services.policy import PolicyClient
 from anm.services.secrets import OpenBaoClient
 
@@ -23,10 +25,11 @@ async def lifespan(app: FastAPI):
     if settings.is_production and settings.auth_mode == "local":
         raise RuntimeError("ANM_AUTH_MODE=local is prohibited in production")
 
-    # Capability manifests are reviewed source artifacts. Synchronize their metadata
-    # before accepting proposals; malformed/forbidden manifests intentionally fail startup.
+    # Capability manifests and the execution kill switch are source/control-plane
+    # authority. Malformed executable artifacts intentionally fail startup.
     with SessionLocal() as db:
         sync_builtin_capabilities(db)
+        ensure_execution_control(db)
         db.commit()
 
     app.state.policy_client = PolicyClient(settings)
@@ -46,7 +49,7 @@ async def lifespan(app: FastAPI):
 settings = get_settings()
 app = FastAPI(
     title="Agentic Network Management",
-    version="0.5.0",
+    version="0.6.0",
     description="Policy-gated autonomous infrastructure and security operations control plane.",
     lifespan=lifespan,
 )
@@ -55,7 +58,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.ui_origin],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
@@ -74,3 +77,4 @@ app.include_router(phase2_router)
 app.include_router(phase3_router)
 app.include_router(phase4_router)
 app.include_router(phase5_router)
+app.include_router(phase6_router)
