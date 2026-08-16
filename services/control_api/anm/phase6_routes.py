@@ -199,9 +199,33 @@ async def dispatch_proposal(
         )
     except ExecutionPermissionError as exc:
         db.rollback()
+        AuditService.record(
+            db,
+            principal=principal,
+            action="execution.dispatch",
+            outcome="forbidden",
+            details={"proposal_id": str(proposal_id), "reason": str(exc)},
+        )
+        db.commit()
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ExecutionValidationError as exc:
-        db.rollback()
+        # create_execution may have performed a fail-closed OPA re-evaluation before
+        # deciding dispatch is unsafe. Persist that new authorization state instead of
+        # rolling it back into a stale-looking AUTHORIZED proposal.
+        AuditService.record(
+            db,
+            principal=principal,
+            action="execution.dispatch",
+            outcome="blocked",
+            details={
+                "proposal_id": str(proposal.id),
+                "reason": str(exc),
+                "proposal_state": proposal.state,
+                "policy_decision": proposal.policy_decision,
+                "policy_version": proposal.policy_version,
+            },
+        )
+        db.commit()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     AuditService.record(
         db,
