@@ -8,4 +8,4 @@ class ActionPolicyDecision(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     required_roles: list[str] = Field(default_factory=list)
     source: Literal["opa", "fail_closed"] = "opa"
-    policy_version: str = "unknown"
+    policy_version: str = Field(min_length=1, max_length=128)
