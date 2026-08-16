@@ -43,7 +43,13 @@ def live() -> dict[str, str]:
 
 
 @router.get("/health/ready", response_model=ReadinessResponse, tags=["health"])
-async def ready(response: Response, db: Db, policy: Policy, secrets: Secrets, bus: Bus) -> ReadinessResponse:
+async def ready(
+    response: Response,
+    db: Db,
+    policy: Policy,
+    secrets: Secrets,
+    bus: Bus,
+) -> ReadinessResponse:
     dependencies: dict[str, DependencyStatus] = {}
 
     try:
@@ -124,7 +130,10 @@ def create_credential_reference(
         db.flush()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="name already exists") from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="name already exists",
+        ) from exc
 
     AuditService.record(
         db,
