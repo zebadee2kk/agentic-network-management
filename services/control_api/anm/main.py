@@ -1,5 +1,5 @@
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,11 +22,9 @@ async def lifespan(app: FastAPI):
     app.state.openbao_client = OpenBaoClient(settings)
     app.state.event_bus = EventBus(settings.nats_url, SessionLocal)
 
-    try:
+    # Keep the API live for diagnosis if NATS is unavailable; readiness remains failed.
+    with suppress(Exception):
         await app.state.event_bus.start()
-    except Exception:
-        # Keep the API live for diagnosis; readiness reports NATS as down.
-        pass
 
     yield
 
