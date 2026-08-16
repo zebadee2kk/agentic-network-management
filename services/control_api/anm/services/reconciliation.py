@@ -146,7 +146,7 @@ def _candidate_scores(
         for asset_id in db.scalars(
             select(AssetAddress.asset_id).where(AssetAddress.address == management_ip)
         ):
-            if 0.35 > scores[asset_id]:
+            if scores[asset_id] < 0.35:
                 scores[asset_id] = 0.35
             if "ip_match_weak_evidence" not in reasons[asset_id]:
                 reasons[asset_id].append("ip_match_weak_evidence")
