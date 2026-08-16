@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     String,
     UniqueConstraint,
@@ -78,6 +79,10 @@ class ActionExecution(Base):
             "'SUCCEEDED','FAILED','AMBIGUOUS','VERIFICATION_FAILED','CANCELLED')",
             name="ck_action_execution_state",
         ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_action_execution_confidence_range",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -98,6 +103,12 @@ class ActionExecution(Base):
     target_asset_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("assets.id"), nullable=False
     )
+    parameters: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    incident_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("incidents.id"), nullable=False
+    )
+    evidence_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
     proposal_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     capability_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     implementation_digest: Mapped[str] = mapped_column(String(64), nullable=False)
