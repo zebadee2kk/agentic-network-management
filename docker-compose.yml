@@ -29,6 +29,8 @@ services:
       ANM_OPA_URL: http://opa:8181
       ANM_OPENBAO_URL: http://openbao:8200
       ANM_UI_ORIGIN: http://localhost:8080
+      ANM_AI_ENABLED: ${ANM_AI_ENABLED:-false}
+      ANM_MODEL_RELAY_URL: http://model-relay:8090
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,6 +125,72 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  ai-worker:
+    build:
+      context: .
+      dockerfile: services/control_api/Dockerfile
+    command: ["python", "-m", "anm.ai_worker"]
+    environment:
+      ANM_ENV: ${ANM_ENV:-development}
+      ANM_LOG_LEVEL: ${ANM_LOG_LEVEL:-INFO}
+      ANM_AUTH_MODE: local
+      ANM_DATABASE_URL: postgresql+psycopg://anm:anm@postgres:5432/anm
+      ANM_NATS_URL: nats://nats:4222
+      ANM_AI_ENABLED: ${ANM_AI_ENABLED:-false}
+      ANM_MODEL_RELAY_URL: http://model-relay:8090
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      model-relay:
+        condition: service_healthy
+    networks:
+      - control
+      - data
+      - ai
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  model-relay:
+    build:
+      context: .
+      dockerfile: services/control_api/Dockerfile
+    command: ["uvicorn", "anm.model_relay:app", "--host", "0.0.0.0", "--port", "8090"]
+    environment:
+      ANM_ENV: ${ANM_ENV:-development}
+      ANM_LOG_LEVEL: ${ANM_LOG_LEVEL:-INFO}
+      ANM_AUTH_MODE: local
+      ANM_DATABASE_URL: postgresql+psycopg://anm:anm@postgres:5432/anm
+      ANM_OPENBAO_URL: http://openbao:8200
+      ANM_OPENBAO_TOKEN_FILE: /run/secrets/openbao_token
+      ANM_AI_LOCAL_PROVIDER_HOSTS: ${ANM_AI_LOCAL_PROVIDER_HOSTS:-ollama,litellm}
+    volumes:
+      - ./config/development/openbao-token:/run/secrets/openbao_token:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      openbao:
+        condition: service_started
+    networks:
+      - ai
+      - data
+      - secrets
+      - model-local
+      - model-egress
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health/live', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -190,6 +258,7 @@ networks:
   edge:
   discovery:
   telemetry:
+  model-egress:
   api:
     internal: true
   control:
@@ -197,4 +266,8 @@ networks:
   data:
     internal: true
   secrets:
+    internal: true
+  ai:
+    internal: true
+  model-local:
     internal: true

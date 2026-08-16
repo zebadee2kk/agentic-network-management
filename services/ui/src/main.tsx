@@ -59,6 +59,27 @@ type SecurityEvent = {
   trust: "untrusted_evidence";
 };
 
+type AIStatus = {
+  enabled: boolean;
+  configured_providers: number;
+  architecture: "isolated_worker_via_model_relay";
+};
+
+type Investigation = {
+  id: string;
+  incident_id: string;
+  provider_id: string;
+  status: string;
+  objective: string;
+  summary?: string | null;
+  confidence?: number | null;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  estimated_cost_usd: number;
+  error_category?: string | null;
+  created_at: string;
+};
+
 function App() {
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [principal, setPrincipal] = useState<Principal | null>(null);
@@ -66,6 +87,8 @@ function App() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [aiStatus, setAIStatus] = useState<AIStatus | null>(null);
+  const [investigations, setInvestigations] = useState<Investigation[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -77,8 +100,19 @@ function App() {
         fetch("/api/v1/reconciliation/candidates"),
         fetch("/api/v1/incidents?limit=12"),
         fetch("/api/v1/events?limit=12"),
+        fetch("/api/v1/ai/status"),
+        fetch("/api/v1/investigations?limit=12"),
       ]);
-      const [readyResponse, principalResponse, assetsResponse, candidatesResponse, incidentsResponse, eventsResponse] = responses;
+      const [
+        readyResponse,
+        principalResponse,
+        assetsResponse,
+        candidatesResponse,
+        incidentsResponse,
+        eventsResponse,
+        aiStatusResponse,
+        investigationsResponse,
+      ] = responses;
       const readyBody = (await readyResponse.json()) as Readiness;
       for (const response of responses.slice(1)) {
         if (!response.ok) {
@@ -91,13 +125,18 @@ function App() {
       setCandidates((await candidatesResponse.json()) as Candidate[]);
       setIncidents((await incidentsResponse.json()) as Incident[]);
       setEvents((await eventsResponse.json()) as SecurityEvent[]);
+      setAIStatus((await aiStatusResponse.json()) as AIStatus);
+      setInvestigations((await investigationsResponse.json()) as Investigation[]);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Control plane unavailable");
     }
   }
 
-  async function resolveCandidate(candidate: Candidate, decision: "attach" | "new_asset" | "reject") {
+  async function resolveCandidate(
+    candidate: Candidate,
+    decision: "attach" | "new_asset" | "reject",
+  ) {
     try {
       const response = await fetch(`/api/v1/reconciliation/candidates/${candidate.id}/resolve`, {
         method: "POST",
@@ -134,7 +173,8 @@ function App() {
           <p className="eyebrow">AUTONOMOUS INFRASTRUCTURE OPERATIONS</p>
           <h1>Agentic Network Management</h1>
           <p className="subtitle">
-            Reconcile infrastructure state, normalize security evidence and build explainable incidents before granting any write authority.
+            Reconcile infrastructure state, normalize security evidence and build explainable
+            incidents before granting any write authority.
           </p>
         </div>
         <div className={`state ${readiness?.ready ? "ok" : "down"}`}>
@@ -186,7 +226,11 @@ function App() {
               <div>
                 <div className="card-title">
                   <h3>{incident.title}</h3>
-                  <span className={`pill ${incident.severity >= 8 ? "down" : incident.severity >= 5 ? "degraded" : "ok"}`}>
+                  <span
+                    className={`pill ${
+                      incident.severity >= 8 ? "down" : incident.severity >= 5 ? "degraded" : "ok"
+                    }`}
+                  >
                     sev {incident.severity}
                   </span>
                 </div>
@@ -195,7 +239,61 @@ function App() {
               </div>
             </article>
           ))}
-          {incidents.length === 0 && <article className="card"><p>No correlated incidents yet.</p></article>}
+          {incidents.length === 0 && (
+            <article className="card"><p>No correlated incidents yet.</p></article>
+          )}
+        </div>
+      </section>
+
+      <section>
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">READ-ONLY AI INVESTIGATION</p>
+            <h2>{investigations.length} recent investigations</h2>
+          </div>
+          <span className={`pill ${aiStatus?.enabled ? "ok" : "degraded"}`}>
+            {aiStatus?.enabled ? "AI enabled" : "AI disabled"}
+          </span>
+        </div>
+        <div className="grid inventory-grid">
+          <article className="card asset-card">
+            <div className="card-title">
+              <h3>Isolation boundary</h3>
+              <span className="pill ok">read only</span>
+            </div>
+            <p>{aiStatus?.configured_providers ?? 0} configured providers</p>
+            <p>Reasoning worker → internal model relay → provider</p>
+            <p className="protected">No managed-network or secret access from ai-worker</p>
+          </article>
+          {investigations.slice(0, 11).map((investigation) => (
+            <article key={investigation.id} className="card asset-card">
+              <div className="card-title">
+                <h3>{investigation.status}</h3>
+                <span
+                  className={`pill ${
+                    investigation.status === "SUCCEEDED"
+                      ? "ok"
+                      : investigation.status === "FAILED"
+                        ? "down"
+                        : "degraded"
+                  }`}
+                >
+                  {investigation.confidence == null
+                    ? "pending"
+                    : `confidence ${investigation.confidence.toFixed(2)}`}
+                </span>
+              </div>
+              <p>Incident {investigation.incident_id.slice(0, 8)}</p>
+              <p>{investigation.summary ?? investigation.objective}</p>
+              <p>
+                {investigation.total_input_tokens + investigation.total_output_tokens} tokens · $ 
+                {investigation.estimated_cost_usd.toFixed(4)} configured estimate
+              </p>
+              {investigation.error_category && (
+                <p className="protected">Failure: {investigation.error_category}</p>
+              )}
+            </article>
+          ))}
         </div>
       </section>
 
@@ -211,7 +309,11 @@ function App() {
             <article key={event.event_id} className="card asset-card">
               <div className="card-title">
                 <h3>{event.source.connector}</h3>
-                <span className={`pill ${event.severity >= 8 ? "down" : event.severity >= 5 ? "degraded" : "ok"}`}>
+                <span
+                  className={`pill ${
+                    event.severity >= 8 ? "down" : event.severity >= 5 ? "degraded" : "ok"
+                  }`}
+                >
                   sev {event.severity}
                 </span>
               </div>
@@ -220,7 +322,9 @@ function App() {
               <p className="protected">{event.trust}</p>
             </article>
           ))}
-          {events.length === 0 && <article className="card"><p>No security telemetry ingested yet.</p></article>}
+          {events.length === 0 && (
+            <article className="card"><p>No security telemetry ingested yet.</p></article>
+          )}
         </div>
       </section>
 
@@ -248,7 +352,9 @@ function App() {
               )}
             </article>
           ))}
-          {assets.length === 0 && <article className="card"><p>No assets discovered yet.</p></article>}
+          {assets.length === 0 && (
+            <article className="card"><p>No assets discovered yet.</p></article>
+          )}
         </div>
       </section>
 
@@ -265,7 +371,9 @@ function App() {
               <div>
                 <div className="card-title">
                   <h3>Observation {candidate.observation_id.slice(0, 8)}</h3>
-                  <span className={`pill ${candidate.status === "conflict" ? "down" : "degraded"}`}>
+                  <span
+                    className={`pill ${candidate.status === "conflict" ? "down" : "degraded"}`}
+                  >
                     {candidate.status}
                   </span>
                 </div>
@@ -279,7 +387,9 @@ function App() {
                 {candidate.candidate_asset_id && (
                   <button onClick={() => void resolveCandidate(candidate, "attach")}>Attach</button>
                 )}
-                <button onClick={() => void resolveCandidate(candidate, "new_asset")}>Keep separate</button>
+                <button onClick={() => void resolveCandidate(candidate, "new_asset")}>
+                  Keep separate
+                </button>
                 <button onClick={() => void resolveCandidate(candidate, "reject")}>Reject</button>
               </div>
             </article>
@@ -294,12 +404,15 @@ function App() {
         <p className="eyebrow">IDENTITY</p>
         <h2>{principal?.subject ?? "Unknown principal"}</h2>
         <p>
-          Provider: <strong>{principal?.provider ?? "—"}</strong> · Roles: {principal?.roles.join(", ") ?? "—"}
+          Provider: <strong>{principal?.provider ?? "—"}</strong> · Roles:{" "}
+          {principal?.roles.join(", ") ?? "—"}
         </p>
       </section>
 
       <footer>
-        Phase 3 is observe-and-correlate only. Telemetry remains untrusted evidence; incident grouping is deterministic; no AI model or telemetry source has remediation authority.
+        Phase 4 AI is optional and read-only. Deterministic monitoring continues without a model;
+        evidence is minimized before reasoning; models have no remediation, approval, secret or
+        managed-network authority.
       </footer>
     </main>
   );

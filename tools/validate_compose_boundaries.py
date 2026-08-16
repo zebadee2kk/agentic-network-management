@@ -26,28 +26,48 @@ def main() -> None:
     if published != {"ui"}:
         fail(f"only ui may publish host ports, got {sorted(published)}")
 
-    expected_ui_networks = {"edge", "api"}
-    if network_names(services["ui"]) != expected_ui_networks:
+    if network_names(services["ui"]) != {"edge", "api"}:
         fail("ui must attach only to edge and api networks")
 
     control_networks = network_names(services["control-api"])
     required_control_networks = {"api", "control", "data", "secrets"}
     if not required_control_networks.issubset(control_networks):
         fail("control-api is missing a required internal network")
-    if control_networks & {"discovery", "telemetry"}:
-        fail("control-api must not have management egress networks")
+    if control_networks & {"discovery", "telemetry", "model-egress", "model-local", "ai"}:
+        fail("control-api must not have worker/provider egress networks")
 
     discovery_networks = network_names(services["discovery-worker"])
-    required_discovery = {"control", "data", "secrets", "discovery"}
-    if discovery_networks != required_discovery:
+    if discovery_networks != {"control", "data", "secrets", "discovery"}:
         fail("discovery-worker network set is not least privilege")
 
     telemetry_networks = network_names(services["telemetry-worker"])
-    required_telemetry = {"control", "data", "secrets", "telemetry"}
-    if telemetry_networks != required_telemetry:
+    if telemetry_networks != {"control", "data", "secrets", "telemetry"}:
         fail("telemetry-worker network set is not least privilege")
 
-    for worker in ("discovery-worker", "telemetry-worker"):
+    # INV-001/002: the reasoning worker has no OpenBao, provider-local or egress
+    # network. It reaches all providers only through model-relay on internal `ai`.
+    ai_worker_networks = network_names(services["ai-worker"])
+    if ai_worker_networks != {"control", "data", "ai"}:
+        fail("ai-worker must attach only to control, data and internal ai networks")
+    if ai_worker_networks & {
+        "secrets",
+        "discovery",
+        "telemetry",
+        "model-egress",
+        "model-local",
+        "edge",
+        "api",
+    }:
+        fail("ai-worker gained a privileged, provider-local or egress network")
+
+    relay_networks = network_names(services["model-relay"])
+    expected_relay = {"ai", "data", "secrets", "model-local", "model-egress"}
+    if relay_networks != expected_relay:
+        fail("model-relay network set is not least privilege")
+    if relay_networks & {"discovery", "telemetry", "edge", "api", "control"}:
+        fail("model-relay must not share managed/browser/control networks")
+
+    for worker in ("discovery-worker", "telemetry-worker", "ai-worker", "model-relay"):
         if network_names(services[worker]) & {"api", "edge"}:
             fail(f"{worker} must not share browser-facing networks")
 
@@ -63,17 +83,45 @@ def main() -> None:
     if telemetry_members != {"telemetry-worker"}:
         fail(f"only telemetry-worker may use telemetry egress, got {sorted(telemetry_members)}")
 
-    protected = ("nats", "opa", "postgres", "openbao", "discovery-worker", "telemetry-worker")
+    model_egress_members = {
+        name for name, service in services.items() if "model-egress" in network_names(service)
+    }
+    if model_egress_members != {"model-relay"}:
+        fail(f"only model-relay may use model egress, got {sorted(model_egress_members)}")
+
+    model_local_members = {
+        name for name, service in services.items() if "model-local" in network_names(service)
+    }
+    if model_local_members != {"model-relay"}:
+        fail(
+            "core compose model-local network must contain only model-relay; "
+            "optional local providers attach separately"
+        )
+
+    ai_members = {name for name, service in services.items() if "ai" in network_names(service)}
+    if ai_members != {"ai-worker", "model-relay"}:
+        fail(f"internal ai network membership is unexpected: {sorted(ai_members)}")
+
+    protected = (
+        "nats",
+        "opa",
+        "postgres",
+        "openbao",
+        "discovery-worker",
+        "telemetry-worker",
+        "ai-worker",
+        "model-relay",
+    )
     for protected_service in protected:
         if network_names(services["ui"]) & network_names(services[protected_service]):
             fail(f"ui must not share a network with {protected_service}")
 
-    for internal_network in ("api", "control", "data", "secrets"):
+    for internal_network in ("api", "control", "data", "secrets", "ai", "model-local"):
         if not networks[internal_network].get("internal", False):
             fail(f"{internal_network} must be internal")
-    for egress_network in ("discovery", "telemetry"):
+    for egress_network in ("discovery", "telemetry", "model-egress"):
         if networks[egress_network].get("internal", False):
-            fail(f"{egress_network} network must provide scoped read-only egress")
+            fail(f"{egress_network} network must provide scoped egress")
 
     print("compose trust boundaries validated")
 
