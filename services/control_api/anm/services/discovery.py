@@ -17,7 +17,10 @@ def persist_observation(db: Session, request: ObservationCreate) -> AssetObserva
     connector = db.get(ConnectorInstance, request.connector_instance_id)
     if connector is None:
         raise DiscoveryConfigurationError("unknown connector instance")
-    if request.discovery_run_id is not None and db.get(DiscoveryRun, request.discovery_run_id) is None:
+    if (
+        request.discovery_run_id is not None
+        and db.get(DiscoveryRun, request.discovery_run_id) is None
+    ):
         raise DiscoveryConfigurationError("unknown discovery run")
     observation = AssetObservation(
         connector_instance_id=request.connector_instance_id,
