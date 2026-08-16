@@ -5,6 +5,7 @@ from contextlib import suppress
 
 import nats
 from nats.errors import TimeoutError as NATSTimeoutError
+from sqlalchemy import select
 
 from anm.action_models import ActionProposal, CapabilityDefinition
 from anm.config import get_settings
@@ -12,11 +13,10 @@ from anm.db import SessionLocal
 from anm.execution_models import ActionExecution, ExecutionBinding
 from anm.executors import get_executor
 from anm.executors.base import ExecutionContext
-from anm.models import Asset, CredentialReference
+from anm.models import Asset, CredentialReference, PlatformSetting, utcnow
 from anm.services.actions import reevaluate_action_proposal
 from anm.services.execution import (
-    claim_execution_for_run,
-    execution_enabled,
+    EXECUTION_CONTROL_KEY,
     mark_execution_cancelled,
     mark_executor_result,
     recover_stale_running,
@@ -45,10 +45,31 @@ async def _prepare_execution(
 ) -> tuple[ExecutionContext, str | None] | None:
     settings = get_settings()
     with SessionLocal() as db:
-        execution = db.get(ActionExecution, execution_id)
+        # Serialize duplicate deliveries before any authorization or side-effect work.
+        execution = db.scalar(
+            select(ActionExecution)
+            .where(ActionExecution.id == execution_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         if execution is None or execution.state != "QUEUED":
             return None
-        enabled, reason, _updated_at = execution_enabled(db)
+
+        # Lock the kill-switch row in the same transaction as the execution claim.
+        # A concurrent disable that commits first is observed here; once this transaction
+        # commits RUNNING, the execution has already won the linearization race.
+        control = db.scalar(
+            select(PlatformSetting)
+            .where(PlatformSetting.key == EXECUTION_CONTROL_KEY)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        enabled = bool(control and control.value.get("enabled", False))
+        reason = (
+            str(control.value.get("reason", "unspecified"))
+            if control is not None
+            else "execution control is unavailable"
+        )
         if not enabled:
             mark_execution_cancelled(
                 db,
@@ -59,9 +80,25 @@ async def _prepare_execution(
             db.commit()
             return None
 
-        proposal = db.get(ActionProposal, execution.proposal_id)
-        binding = db.get(ExecutionBinding, execution.binding_id)
-        asset = db.get(Asset, execution.target_asset_id)
+        # Keep mutable authorization context locked until RUNNING is durably committed.
+        proposal = db.scalar(
+            select(ActionProposal)
+            .where(ActionProposal.id == execution.proposal_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        binding = db.scalar(
+            select(ExecutionBinding)
+            .where(ExecutionBinding.id == execution.binding_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        asset = db.scalar(
+            select(Asset)
+            .where(Asset.id == execution.target_asset_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         if proposal is None or binding is None or asset is None:
             mark_execution_cancelled(
                 db,
@@ -80,6 +117,26 @@ async def _prepare_execution(
                 execution,
                 category="authorization_changed",
                 detail="proposal failed pre-side-effect re-authorization",
+            )
+            db.commit()
+            return None
+        if asset.status != "active":
+            mark_execution_cancelled(
+                db,
+                execution,
+                category="target_unavailable",
+                detail="target asset is no longer active",
+            )
+            db.commit()
+            return None
+        if execution.target_criticality != asset.criticality or sorted(
+            execution.target_protected_roles
+        ) != sorted(asset.protected_roles):
+            mark_execution_cancelled(
+                db,
+                execution,
+                category="target_policy_context_changed",
+                detail="target criticality or protected roles changed before side effect",
             )
             db.commit()
             return None
@@ -134,23 +191,21 @@ async def _prepare_execution(
                 return None
             secret_ref = credential.secret_ref
 
-        # The final side-effect claim uses a row lock and a fresh read. Concurrent
-        # duplicate deliveries cannot both transition QUEUED -> RUNNING.
-        claimed = claim_execution_for_run(db, execution_id)
-        if claimed is None:
-            db.rollback()
-            return None
         context = ExecutionContext(
-            execution_id=str(claimed.id),
-            capability=claimed.capability,
-            target_asset_id=str(claimed.target_asset_id),
+            execution_id=str(execution.id),
+            capability=execution.capability,
+            target_asset_id=str(execution.target_asset_id),
             endpoint=binding.endpoint,
-            parameters=dict(proposal.parameters),
+            parameters=dict(execution.parameters),
             binding_config=dict(binding.config),
             implementation=implementation,
         )
         # RUNNING is durable before external I/O. A crash after this commit is not
         # automatically retried; stale recovery converts it to AMBIGUOUS.
+        execution.state = "RUNNING"
+        execution.started_at = utcnow()
+        execution.error_category = None
+        execution.error_detail = None
         db.commit()
         return context, secret_ref
 
