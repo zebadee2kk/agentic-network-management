@@ -1,4 +1,8 @@
+import asyncio
+import ipaddress
+import socket
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy.orm import Session
 
@@ -44,6 +48,42 @@ def _connector_token(secret: dict[str, Any]) -> str:
     return token.strip()
 
 
+def _address_allowed(address: str, allowed_cidrs: list[str]) -> bool:
+    candidate = ipaddress.ip_address(address)
+    return any(candidate in ipaddress.ip_network(cidr, strict=False) for cidr in allowed_cidrs)
+
+
+async def validate_connector_endpoint(base_url: str, allowed_cidrs: list[str]) -> set[str]:
+    """Resolve a configured connector origin and require every address to be explicitly allowed."""
+    if not allowed_cidrs:
+        raise DiscoveryConfigurationError(
+            "managed scope must define connector_cidrs before discovery can use credentials"
+        )
+    hostname = urlsplit(base_url).hostname
+    if not hostname:
+        raise DiscoveryConfigurationError("connector base URL has no hostname")
+    try:
+        literal = ipaddress.ip_address(hostname)
+        addresses = {str(literal)}
+    except ValueError:
+        try:
+            results = await asyncio.to_thread(
+                socket.getaddrinfo,
+                hostname,
+                None,
+                0,
+                socket.SOCK_STREAM,
+            )
+        except socket.gaierror as exc:
+            raise DiscoveryConfigurationError("connector hostname could not be resolved") from exc
+        addresses = {str(item[4][0]) for item in results}
+    if not addresses or not all(_address_allowed(address, allowed_cidrs) for address in addresses):
+        raise DiscoveryConfigurationError(
+            "connector endpoint resolved outside the managed connector_cidrs"
+        )
+    return addresses
+
+
 async def execute_discovery_run(
     db: Session,
     run: DiscoveryRun,
@@ -64,6 +104,10 @@ async def execute_discovery_run(
         raise DiscoveryConfigurationError("connector type is not allowed by managed scope")
     if not connector_instance.secret_ref:
         raise DiscoveryConfigurationError("connector requires an OpenBao secret reference")
+
+    # Validate the endpoint before dereferencing any credential. This prevents a
+    # configuration mistake from turning a secret reference into arbitrary egress.
+    await validate_connector_endpoint(connector_instance.base_url, scope.connector_cidrs)
 
     run.status = "running"
     run.started_at = utcnow()
