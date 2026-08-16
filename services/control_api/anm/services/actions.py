@@ -307,6 +307,8 @@ async def create_action_proposal(
     now = utcnow()
     proposal = ActionProposal(
         id=uuid.uuid4(),
+        schema_version="1.0.0",
+        revision=1,
         capability_definition_id=capability.id,
         capability=capability.capability_id,
         capability_version=capability.version,
