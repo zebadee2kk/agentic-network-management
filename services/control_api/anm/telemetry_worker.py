@@ -20,6 +20,12 @@ from anm.services.security import ingest_event
 
 CONSUMER = "phase3-wazuh-telemetry-worker"
 SUBJECT = "telemetry.wazuh.poll_requested"
+OBSERVATION_SUBJECTS = [
+    "discovery.>",
+    "asset.observed.>",
+    "topology.observed.>",
+    "telemetry.>",
+]
 
 
 async def _connect_nats(url: str):
@@ -66,7 +72,9 @@ async def _process_source(source_id: uuid.UUID, secrets: OpenBaoClient) -> tuple
         if source.source_type != "wazuh":
             raise DiscoveryConfigurationError("telemetry worker only polls Wazuh sources")
         if not source.base_url or not source.secret_ref or source.scope_id is None:
-            raise DiscoveryConfigurationError("Wazuh source is missing scope, URL or secret reference")
+            raise DiscoveryConfigurationError(
+                "Wazuh source is missing scope, URL or secret reference"
+            )
         scope = db.get(ManagedScope, source.scope_id)
         if scope is None or not scope.enabled:
             raise DiscoveryConfigurationError("Wazuh source scope is unavailable")
@@ -173,7 +181,7 @@ async def run_worker() -> None:
     except NotFoundError:
         await js.add_stream(
             name="OBSERVATIONS",
-            subjects=["discovery.>", "asset.observed.>", "topology.observed.>", "telemetry.>"],
+            subjects=OBSERVATION_SUBJECTS,
             storage="file",
         )
     subscription = await js.pull_subscribe(
