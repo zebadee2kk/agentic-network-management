@@ -22,9 +22,10 @@ credential from OpenBao, validates the destination and performs the OpenAI-compa
 HTTP request. Provider credentials are HTTP headers only and are never added to model
 messages.
 
-The external relay rejects destinations resolving to private, loopback, link-local,
-multicast, unspecified or reserved addresses. An `isolated_local` provider is allowed
-only when its hostname is explicitly listed in `ANM_AI_LOCAL_PROVIDER_HOSTS`.
+External providers must use HTTPS. The relay rejects external destinations resolving to
+private, loopback, link-local, multicast, unspecified or reserved addresses. An
+`isolated_local` provider is allowed only when its hostname is explicitly listed in
+`ANM_AI_LOCAL_PROVIDER_HOSTS`; HTTP is permitted only for this isolated-local mode.
 
 ## Enablement
 
@@ -46,18 +47,22 @@ To enable investigations:
 5. Request an investigation with
    `POST /api/v1/incidents/{incident_id}/investigations`.
 
-Provider `base_url` must end in `/v1`. The current adapter uses the
-OpenAI-compatible `/chat/completions` shape. Local Ollama/LiteLLM-style deployments
-should be attached to the isolated model-provider network and explicitly allowlisted.
+Provider `base_url` paths must end in `/v1`; a prefix before `/v1` is allowed. This covers
+common OpenAI-compatible layouts such as OpenAI `/v1`, OpenRouter `/api/v1` and Groq
+`/openai/v1`. The relay appends `/chat/completions`. Local Ollama/LiteLLM-style
+deployments should use the isolated model-provider network and explicit hostname allowlist.
 
 ## Evidence minimisation
 
-SOC and Network Analyst bundles are built from canonical platform data. Only selected
-fields are included. Obvious credential fields, bearer tokens, assignment-style secret
-markers, private-key blocks and OpenBao references are redacted before the request is
-constructed. Context size and event count are capped.
+Model evidence is intentionally lossy. The Phase-4 bundle excludes raw command lines,
+full logs, arbitrary HTTP headers/bodies, URLs and unbounded protocol dictionaries. SOC
+and Network Analyst bundles contain generated event labels plus selected structured
+fields only. This allowlist is the primary data-minimisation control.
 
-Every source item remains labelled `untrusted_evidence`.
+A recursive redactor remains defense in depth for selected string fields and removes
+obvious credential keys, bearer tokens, assignment-style secret markers, private-key
+blocks and OpenBao references. Context size and event count are capped. Every source item
+remains labelled `untrusted_evidence`.
 
 ## Agent execution
 
@@ -73,8 +78,8 @@ tool call can be made in Phase 4.
 
 Model output must validate against
 `schemas/investigation-result.schema.json`. Evidence IDs must be a subset of the IDs
-actually supplied to that agent. Invalid JSON, extra fields such as `tool_calls`,
-role mismatches or fabricated evidence IDs fail the investigation.
+actually supplied to that agent. Invalid JSON, extra fields such as `tool_calls`, role
+mismatches or fabricated evidence IDs fail the investigation.
 
 ## Audit/cost data
 
@@ -88,8 +93,10 @@ The platform stores:
 - configured cost estimate
 - validated findings/hypotheses
 - incident timeline entry
+- redacted failed-invocation metadata when a provider call itself fails
 
-Raw prompts and raw model responses are not persisted as model-invocation records.
+Raw prompts, raw model responses, provider credentials and raw provider exception text are
+not persisted as model-invocation records.
 
 Provider config may define:
 

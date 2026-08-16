@@ -57,6 +57,36 @@ def test_isolated_local_provider_may_use_http() -> None:
     assert provider.base_url == "http://ollama:11434/v1"
 
 
+def test_openai_compatible_base_paths_may_include_prefix_before_v1() -> None:
+    openrouter = ModelProviderCreate(
+        name="openrouter",
+        locality="external",
+        base_url="https://openrouter.ai/api/v1",
+        model="test/model",
+        secret_ref="openbao://models/openrouter",
+    )
+    groq = ModelProviderCreate(
+        name="groq",
+        locality="external",
+        base_url="https://api.groq.com/openai/v1",
+        model="test-model",
+        secret_ref="openbao://models/groq",
+    )
+    assert openrouter.base_url.endswith("/api/v1")
+    assert groq.base_url.endswith("/openai/v1")
+
+
+def test_base_path_must_still_end_with_v1() -> None:
+    with pytest.raises(ValidationError, match="end with /v1"):
+        ModelProviderCreate(
+            name="bad-path",
+            locality="external",
+            base_url="https://example.com/api/v2",
+            model="test",
+            secret_ref="openbao://models/bad-path",
+        )
+
+
 def test_upstream_request_never_exposes_provider_side_tools() -> None:
     provider = ModelProvider(
         id=uuid.uuid4(),

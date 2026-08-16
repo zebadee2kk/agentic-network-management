@@ -26,8 +26,8 @@ class ModelProviderCreate(BaseModel):
             raise ValueError("model base_url must use http:// or https:// with a host")
         if parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError("model base_url must not contain credentials, query or fragment")
-        if parsed.path.rstrip("/") != "/v1":
-            raise ValueError("model base_url must end with /v1")
+        if not parsed.path.rstrip("/").endswith("/v1"):
+            raise ValueError("model base_url path must end with /v1")
         return value.rstrip("/")
 
     @field_validator("secret_ref")

@@ -52,8 +52,8 @@ async def validate_provider_endpoint(provider: ModelProvider) -> None:
     parsed = urlsplit(provider.base_url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("provider base URL must use HTTP or HTTPS")
-    if parsed.path.rstrip("/") != "/v1" or not parsed.hostname:
-        raise ValueError("provider base URL must end with /v1")
+    if not parsed.hostname or not parsed.path.rstrip("/").endswith("/v1"):
+        raise ValueError("provider base URL path must end with /v1")
     if provider.locality not in {"external", "isolated_local"}:
         raise ValueError("unknown model provider locality")
 
