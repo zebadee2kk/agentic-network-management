@@ -87,6 +87,42 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  telemetry-worker:
+    build:
+      context: .
+      dockerfile: services/control_api/Dockerfile
+    command: ["python", "-m", "anm.telemetry_worker"]
+    environment:
+      ANM_ENV: ${ANM_ENV:-development}
+      ANM_LOG_LEVEL: ${ANM_LOG_LEVEL:-INFO}
+      ANM_AUTH_MODE: local
+      ANM_DATABASE_URL: postgresql+psycopg://anm:anm@postgres:5432/anm
+      ANM_NATS_URL: nats://nats:4222
+      ANM_OPA_URL: http://opa:8181
+      ANM_OPENBAO_URL: http://openbao:8200
+      ANM_OPENBAO_TOKEN_FILE: /run/secrets/openbao_token
+    volumes:
+      - ./config/development/openbao-token:/run/secrets/openbao_token:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      openbao:
+        condition: service_started
+    networks:
+      - control
+      - data
+      - secrets
+      - telemetry
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -153,6 +189,7 @@ volumes:
 networks:
   edge:
   discovery:
+  telemetry:
   api:
     internal: true
   control:

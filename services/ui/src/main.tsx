@@ -38,24 +38,49 @@ type Candidate = {
   resolution?: string | null;
 };
 
+type Incident = {
+  id: string;
+  title: string;
+  state: string;
+  severity: number;
+  confidence: number;
+  summary: string;
+  last_activity_at: string;
+};
+
+type SecurityEvent = {
+  event_id: string;
+  occurred_at: string;
+  source: { connector: string; instance: string };
+  type: string;
+  severity: number;
+  confidence: number;
+  summary: string;
+  trust: "untrusted_evidence";
+};
+
 function App() {
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [principal, setPrincipal] = useState<Principal | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [events, setEvents] = useState<SecurityEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
     try {
-      const [readyResponse, principalResponse, assetsResponse, candidatesResponse] =
-        await Promise.all([
-          fetch("/health/ready"),
-          fetch("/api/v1/whoami"),
-          fetch("/api/v1/assets"),
-          fetch("/api/v1/reconciliation/candidates"),
-        ]);
+      const responses = await Promise.all([
+        fetch("/health/ready"),
+        fetch("/api/v1/whoami"),
+        fetch("/api/v1/assets"),
+        fetch("/api/v1/reconciliation/candidates"),
+        fetch("/api/v1/incidents?limit=12"),
+        fetch("/api/v1/events?limit=12"),
+      ]);
+      const [readyResponse, principalResponse, assetsResponse, candidatesResponse, incidentsResponse, eventsResponse] = responses;
       const readyBody = (await readyResponse.json()) as Readiness;
-      for (const response of [principalResponse, assetsResponse, candidatesResponse]) {
+      for (const response of responses.slice(1)) {
         if (!response.ok) {
           throw new Error(`control-plane request failed: ${response.status}`);
         }
@@ -64,6 +89,8 @@ function App() {
       setPrincipal((await principalResponse.json()) as Principal);
       setAssets((await assetsResponse.json()) as Asset[]);
       setCandidates((await candidatesResponse.json()) as Candidate[]);
+      setIncidents((await incidentsResponse.json()) as Incident[]);
+      setEvents((await eventsResponse.json()) as SecurityEvent[]);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Control plane unavailable");
@@ -96,6 +123,9 @@ function App() {
   const openCandidates = candidates.filter(
     (candidate) => candidate.status === "pending" || candidate.status === "conflict",
   );
+  const openIncidents = incidents.filter(
+    (incident) => incident.state !== "CLOSED" && incident.state !== "FALSE_POSITIVE",
+  );
 
   return (
     <main>
@@ -104,7 +134,7 @@ function App() {
           <p className="eyebrow">AUTONOMOUS INFRASTRUCTURE OPERATIONS</p>
           <h1>Agentic Network Management</h1>
           <p className="subtitle">
-            Discover and reconcile network state before any automation receives write authority.
+            Reconcile infrastructure state, normalize security evidence and build explainable incidents before granting any write authority.
           </p>
         </div>
         <div className={`state ${readiness?.ready ? "ok" : "down"}`}>
@@ -137,6 +167,60 @@ function App() {
           ) : (
             <article className="card"><p>Loading dependency state…</p></article>
           )}
+        </div>
+      </section>
+
+      <section>
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">SECURITY OPERATIONS</p>
+            <h2>{openIncidents.length} open incidents</h2>
+          </div>
+          <span className={`pill ${openIncidents.length > 0 ? "degraded" : "ok"}`}>
+            deterministic correlation
+          </span>
+        </div>
+        <div className="review-list">
+          {incidents.map((incident) => (
+            <article key={incident.id} className="card review-card">
+              <div>
+                <div className="card-title">
+                  <h3>{incident.title}</h3>
+                  <span className={`pill ${incident.severity >= 8 ? "down" : incident.severity >= 5 ? "degraded" : "ok"}`}>
+                    sev {incident.severity}
+                  </span>
+                </div>
+                <p>{incident.state} · confidence {incident.confidence.toFixed(2)}</p>
+                <p>{incident.summary}</p>
+              </div>
+            </article>
+          ))}
+          {incidents.length === 0 && <article className="card"><p>No correlated incidents yet.</p></article>}
+        </div>
+      </section>
+
+      <section>
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">UNTRUSTED EVIDENCE</p>
+            <h2>Recent canonical events</h2>
+          </div>
+        </div>
+        <div className="grid inventory-grid">
+          {events.map((event) => (
+            <article key={event.event_id} className="card asset-card">
+              <div className="card-title">
+                <h3>{event.source.connector}</h3>
+                <span className={`pill ${event.severity >= 8 ? "down" : event.severity >= 5 ? "degraded" : "ok"}`}>
+                  sev {event.severity}
+                </span>
+              </div>
+              <p>{event.type} · {event.source.instance}</p>
+              <p>{event.summary}</p>
+              <p className="protected">{event.trust}</p>
+            </article>
+          ))}
+          {events.length === 0 && <article className="card"><p>No security telemetry ingested yet.</p></article>}
         </div>
       </section>
 
@@ -215,8 +299,7 @@ function App() {
       </section>
 
       <footer>
-        Phase 2 discovery is read-only. Canonical identity is owned by reconciliation, not by NetBox,
-        LibreNMS, IP address, or an AI model.
+        Phase 3 is observe-and-correlate only. Telemetry remains untrusted evidence; incident grouping is deterministic; no AI model or telemetry source has remediation authority.
       </footer>
     </main>
   );
