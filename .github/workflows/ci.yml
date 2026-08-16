@@ -29,6 +29,20 @@ jobs:
           ANM_DATABASE_URL: sqlite+pysqlite:///./migration-smoke.db
         run: alembic upgrade head
 
+  phase6-safety:
+    name: Phase 6 execution safety
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e '.[dev]'
+      - name: Execution safety tests
+        run: pytest -q tests/test_phase6_execution.py
+
   policy:
     name: OPA policy
     runs-on: ubuntu-latest
@@ -73,7 +87,7 @@ jobs:
 
   appliance:
     name: Appliance smoke test
-    needs: [python, policy, ui, compose]
+    needs: [python, phase6-safety, policy, ui, compose]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
