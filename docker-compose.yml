@@ -1,0 +1,119 @@
+name: agentic-network-management
+
+services:
+  ui:
+    build:
+      context: .
+      dockerfile: services/ui/Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      control-api:
+        condition: service_healthy
+    networks:
+      - edge
+      - control
+    restart: unless-stopped
+
+  control-api:
+    build:
+      context: .
+      dockerfile: services/control_api/Dockerfile
+    environment:
+      ANM_ENV: ${ANM_ENV:-development}
+      ANM_LOG_LEVEL: ${ANM_LOG_LEVEL:-INFO}
+      ANM_AUTH_MODE: ${ANM_AUTH_MODE:-local}
+      ANM_LOCAL_PRINCIPAL: ${ANM_LOCAL_PRINCIPAL:-local-admin}
+      ANM_DATABASE_URL: postgresql+psycopg://anm:anm@postgres:5432/anm
+      ANM_NATS_URL: nats://nats:4222
+      ANM_OPA_URL: http://opa:8181
+      ANM_OPENBAO_URL: http://openbao:8200
+      ANM_OPENBAO_TOKEN_FILE: /run/secrets/openbao_token
+      ANM_UI_ORIGIN: http://localhost:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      opa:
+        condition: service_started
+      openbao:
+        condition: service_started
+    networks:
+      - control
+      - data
+      - secrets
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: anm
+      POSTGRES_USER: anm
+      POSTGRES_PASSWORD: anm
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U anm -d anm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  nats:
+    image: nats:2.12-alpine
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    volumes:
+      - nats-data:/data
+    networks:
+      - control
+    restart: unless-stopped
+
+  opa:
+    image: openpolicyagent/opa:1.12.2-static
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - --skip-version-check
+      - /policies
+    volumes:
+      - ./policies/opa:/policies:ro
+    networks:
+      - control
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  openbao:
+    image: openbao/openbao:2.6.1
+    # Development-only unsealed server. Production deployment MUST use durable
+    # storage, TLS, initialization/unseal/bootstrap and workload identities.
+    command: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - secrets
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  nats-data:
+
+networks:
+  edge:
+  control:
+    internal: true
+  data:
+    internal: true
+  secrets:
+    internal: true
