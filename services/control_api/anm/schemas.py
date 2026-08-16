@@ -1,8 +1,34 @@
+import ipaddress
 import uuid
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+ASSET_TYPES = {
+    "endpoint",
+    "server",
+    "network_device",
+    "firewall",
+    "router",
+    "switch",
+    "wireless_ap",
+    "hypervisor",
+    "virtual_machine",
+    "iot",
+    "printer",
+    "service",
+    "unknown",
+}
+PROTECTED_ROLES = {
+    "identity",
+    "backup",
+    "core_network",
+    "security_control",
+    "platform_control",
+    "hypervisor",
+    "critical_application",
+}
 
 
 class DependencyStatus(BaseModel):
@@ -86,3 +112,214 @@ class AuditEventResponse(BaseModel):
     outcome: str
     correlation_id: str | None
     details: dict[str, Any]
+
+
+class ManagedScopeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=128)
+    cidrs: list[str] = Field(default_factory=list, max_length=128)
+    allowed_connector_types: list[Literal["netbox", "librenms"]] = Field(default_factory=list)
+    max_requests_per_minute: int = Field(default=30, ge=1, le=600)
+    enabled: bool = True
+
+    @field_validator("cidrs")
+    @classmethod
+    def validate_cidrs(cls, values: list[str]) -> list[str]:
+        return [str(ipaddress.ip_network(value, strict=False)) for value in values]
+
+
+class ManagedScopeResponse(ManagedScopeCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConnectorInstanceCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=128)
+    connector_type: Literal["netbox", "librenms"]
+    base_url: str = Field(min_length=8, max_length=1024)
+    scope_id: uuid.UUID
+    site_id: uuid.UUID | None = None
+    config: dict[str, Any] = Field(default_factory=dict)
+    secret_ref: str | None = Field(default=None, max_length=1024)
+
+    @field_validator("secret_ref")
+    @classmethod
+    def validate_secret_ref(cls, value: str | None) -> str | None:
+        if value is not None and not value.startswith("openbao://"):
+            raise ValueError("connector secret references must use openbao://")
+        return value
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("connector base_url must use http:// or https://")
+        return value.rstrip("/")
+
+
+class ConnectorInstanceResponse(ConnectorInstanceCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ObservationIdentifier(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    namespace: str = Field(min_length=1, max_length=128)
+    value: str = Field(min_length=1, max_length=512)
+    confidence: float = Field(default=1.0, ge=0, le=1)
+
+
+class TopologyHint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    relationship: Literal[
+        "connected_to",
+        "member_of_vlan",
+        "routed_via",
+        "hosted_on",
+        "depends_on",
+        "managed_by",
+        "located_at",
+    ]
+    target_namespace: str = Field(min_length=1, max_length=128)
+    target_value: str = Field(min_length=1, max_length=512)
+    confidence: float = Field(default=1.0, ge=0, le=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ObservationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    connector_instance_id: uuid.UUID
+    discovery_run_id: uuid.UUID | None = None
+    observed_at: datetime
+    kind: Literal["device"] = "device"
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    identifiers: list[ObservationIdentifier] = Field(default_factory=list, max_length=128)
+    topology: list[TopologyHint] = Field(default_factory=list, max_length=128)
+
+
+class ObservationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    connector_instance_id: uuid.UUID
+    discovery_run_id: uuid.UUID | None
+    observed_at: datetime
+    kind: str
+    attributes: dict[str, Any]
+    identifiers: list[dict[str, Any]]
+    topology: list[dict[str, Any]]
+    reconciliation_state: str
+    reconciled_asset_id: uuid.UUID | None
+    created_at: datetime
+
+
+class AssetIdentifierResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    namespace: str
+    value: str
+    confidence: float
+    first_seen: datetime
+    last_seen: datetime
+
+
+class AssetAddressResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    address: str
+    address_type: str
+    source: str
+    first_seen: datetime
+    last_seen: datetime
+
+
+class AssetResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    schema_version: str
+    display_name: str
+    asset_type: str
+    criticality: str
+    status: str
+    site_id: uuid.UUID | None
+    network_zone: str | None
+    protected_roles: list[str]
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssetDetailResponse(AssetResponse):
+    identifiers: list[AssetIdentifierResponse]
+    addresses: list[AssetAddressResponse]
+
+
+class ReconciliationCandidateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    observation_id: uuid.UUID
+    candidate_asset_id: uuid.UUID | None
+    score: float
+    reasons: list[str]
+    status: str
+    resolution: str | None
+    created_at: datetime
+    resolved_at: datetime | None
+
+
+class ReconciliationResolutionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["attach", "new_asset", "reject"]
+
+
+class DiscoveryRunCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    connector_instance_id: uuid.UUID
+
+
+class DiscoveryRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    scope_id: uuid.UUID
+    connector_instance_id: uuid.UUID
+    status: str
+    observations_count: int
+    reconciled_count: int
+    conflicts_count: int
+    error_category: str | None
+    error_detail: str | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    created_at: datetime
+
+
+class TopologyEdgeResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    source_asset_id: uuid.UUID
+    target_asset_id: uuid.UUID
+    relationship: str
+    source: str
+    origin: str
+    confidence: float
+    observed_at: datetime
+    expires_at: datetime | None
+    edge_metadata: dict[str, Any]
