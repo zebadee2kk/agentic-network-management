@@ -18,6 +18,14 @@ control-api dispatch re-check
   - capability-specific prechecks
       |
       v
+immutable execution snapshot
+  - exact parameters
+  - incident/evidence IDs
+  - confidence
+  - proposal/capability/implementation digests
+  - target criticality/protected roles
+      |
+      v
 QUEUED execution + stable idempotency key
       |
       v
@@ -58,6 +66,7 @@ The executor and verifier are separate runtime roles. The verifier has no OpenBa
 - a remote timeout is `AMBIGUOUS`, never a retry signal
 - success requires independent verification
 - rollback is another typed proposal and follows normal OPA/approval policy
+- rollback is generated only when the platform knows the original pre-state and can prove the inverse action restores it
 
 ## Execution kill switch
 
@@ -75,7 +84,9 @@ Endpoints:
 - `GET /api/v1/execution-control`
 - `PUT /api/v1/execution-control` (`platform_admin` only)
 
-Disabling the switch prevents new dispatch and also stops queued work during the executor's final pre-side-effect check. It does not disable monitoring, incident correlation or read-only AI investigation.
+Disabling the switch prevents new dispatch and also stops queued work during the executor's final pre-side-effect check. It does not disable monitoring, incident correlation or read-only AI investigation. An execution already durably claimed as `RUNNING` is not force-killed because the remote outcome would become unknowable; it is completed or reconciled through the ambiguity/verification path.
+
+The dashboard exposes the same control with an explicit operator confirmation. UI controls do not bypass backend authorization.
 
 ## Execution bindings
 
@@ -102,6 +113,8 @@ A capability never accepts connection details or credentials as action parameter
 ```
 
 The binding owns operational connectivity. The proposal contains only semantic action parameters such as `service_name` or `address`.
+
+Reference adapters require an `http(s)` origin. Ansible bindings require a host/IP endpoint rather than an arbitrary URL. Platform service names and prohibited address classes are rejected before a binding is accepted.
 
 ## Executable catalogue in this phase
 
@@ -138,6 +151,24 @@ Example:
 
 Changing any reviewed artifact changes `implementation_digest`, then `capability_digest`. Dispatch and the executor both re-evaluate the proposal, so an approval bound to the old implementation cannot authorize the new code.
 
+## Immutable execution snapshot
+
+Dispatch copies the exact authorized semantic context into `action_executions` before any work is queued:
+
+- capability/version
+- target asset
+- action parameters
+- incident ID
+- evidence IDs
+- confidence
+- proposal/capability/implementation digests
+- policy version
+- target criticality/protected-role snapshot
+
+The execution and verifier do not depend on a later-mutated proposal for those values. If the proposal changes before the executor claims the work, its digest no longer matches and execution is cancelled before side effects.
+
+A dispatch-time OPA re-evaluation that changes the proposal to `DENIED` or otherwise unauthorizes it is persisted and audited even though the dispatch HTTP request is rejected. The API does not roll the proposal back into a stale-looking `AUTHORIZED` state.
+
 ## Idempotency and ambiguity
 
 Every execution derives one stable idempotency key from:
@@ -146,7 +177,7 @@ Every execution derives one stable idempotency key from:
 proposal_digest + capability_digest + implementation_digest
 ```
 
-The database enforces uniqueness. Repeated dispatch of the same exact proposal returns the existing execution.
+The database enforces uniqueness. Repeated or racing dispatches of the same exact proposal return the existing execution.
 
 JetStream is at-least-once. Therefore duplicate messages are expected. Immediately before external I/O, the executor obtains a database row lock and refreshes the execution row. Only one transaction may change `QUEUED` to `RUNNING`.
 
@@ -181,7 +212,11 @@ GET/PUT/DELETE <binding-origin>/v1/firewall/blocks/{schema-validated-address}
 GET            <binding-origin>/v1/observer/firewall/blocks/{schema-validated-address}
 ```
 
-The proposal cannot change the origin, route or HTTP method. Production vendor adapters can replace these contracts while preserving the same typed capability interface.
+The proposal cannot change the origin, route or HTTP method. IPv6 addresses are path-encoded rather than interpolated unsafely.
+
+Before changing state, the reference adapters read the current state. If the desired state already exists they do not repeat the write. The captured pre-state is marked `known=true` only after that observation succeeds.
+
+Production vendor adapters can replace these contracts while preserving the same typed capability interface.
 
 ## Independent verification
 
@@ -189,7 +224,7 @@ The verifier worker receives only an execution ID. It has database + NATS access
 
 For Ansible service restart, the binding must configure an independent `tcp_probe` or `http_probe`. Without one, the action is **not** marked successful.
 
-For the reference endpoint/firewall adapters, the verifier uses the read-only observer route rather than the authenticated execution route.
+For the reference endpoint/firewall adapters, the verifier uses the read-only observer route rather than the authenticated execution route. It reads semantic values such as the firewall address from the immutable execution snapshot, not from mutable proposal state or best-effort executor output.
 
 State semantics:
 
@@ -211,7 +246,31 @@ endpoint.isolate   -> endpoint.unisolate
 firewall.block_ip  -> firewall.unblock_ip
 ```
 
-The rollback proposal receives a new proposal digest, current OPA evaluation and normal human approval requirements. When eventually dispatched it receives its own execution/idempotency/verification lifecycle and records `rollback_of_execution_id`.
+Rollback uses the immutable execution snapshot for incident/evidence/confidence and semantic action parameters. It does **not** trust a proposal that may have changed after dispatch.
+
+Rollback also requires known pre-state:
+
+- if endpoint isolation was already enabled before ANM executed `endpoint.isolate`, ANM refuses to generate `endpoint.unisolate`
+- if the IP block already existed before ANM executed `firewall.block_ip`, ANM refuses to remove it
+- if a timeout/crash left pre-state unknown, automatic rollback planning is refused
+
+This ensures rollback restores ANM's change rather than removing a pre-existing protection.
+
+A valid rollback proposal receives a new proposal digest, current OPA evaluation and normal human approval requirements. When eventually dispatched it receives its own execution/idempotency/verification lifecycle and records `rollback_of_execution_id`.
+
+## Operator dashboard
+
+The Phase-6 dashboard shows:
+
+- global execution kill-switch state
+- authorized executable proposals awaiting dispatch
+- reviewed adapter/risk/digest context
+- dispatch control only for eligible operator roles
+- recent execution lifecycle states
+- prominent `AMBIGUOUS` and `VERIFICATION_FAILED` explanations
+- rollback-planning control for reversible eligible executions
+
+Enabling execution and dispatching a change require explicit browser confirmation, but those confirmations are usability safeguards only. Backend RBAC, OPA, digest checks and execution state remain authoritative.
 
 ## Execution API
 
