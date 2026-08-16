@@ -124,7 +124,10 @@ def request_wazuh_poll(
     if not scope.connector_cidrs:
         raise HTTPException(status_code=400, detail="managed scope has no connector_cidrs")
     if not source.base_url or not source.secret_ref:
-        raise HTTPException(status_code=409, detail="Wazuh source is missing URL or secret reference")
+        raise HTTPException(
+            status_code=409,
+            detail="Wazuh source is missing URL or secret reference",
+        )
 
     message_id = str(uuid.uuid4())
     db.add(
@@ -178,7 +181,7 @@ def _ingest_batch(
         if incident is not None and incident.id not in incident_ids:
             incident_ids.append(incident.id)
     configured.status = "healthy"
-    db.commit()
+    db.flush()
     return TelemetryBatchResponse(
         accepted=accepted,
         duplicates=duplicates,
