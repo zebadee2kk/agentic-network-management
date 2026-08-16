@@ -193,6 +193,10 @@ async def create_execution(
         capability=proposal.capability,
         capability_version=proposal.capability_version,
         target_asset_id=proposal.target_asset_id,
+        parameters=dict(proposal.parameters),
+        incident_id=proposal.incident_id,
+        evidence_ids=list(proposal.evidence_ids),
+        confidence=proposal.confidence,
         proposal_digest=proposal.proposal_digest,
         capability_digest=proposal.capability_digest,
         implementation_digest=proposal.implementation_digest,
@@ -372,13 +376,25 @@ def mark_verification_result(
     db.flush()
 
 
-def _rollback_parameters(source: ActionExecution, proposal: ActionProposal) -> dict[str, Any]:
+def _rollback_parameters(source: ActionExecution) -> dict[str, Any]:
+    if source.pre_state.get("known") is not True:
+        raise ExecutionValidationError(
+            "rollback is unsafe because the source execution has no known pre-state"
+        )
     if source.capability == "endpoint.isolate":
+        if source.pre_state.get("isolated") is True:
+            raise ExecutionValidationError(
+                "endpoint was already isolated before execution; inverse action would not restore pre-state"
+            )
         return {"reason_code": "rollback"}
     if source.capability == "firewall.block_ip":
-        address = proposal.parameters.get("address")
+        if source.pre_state.get("block_existed") is True:
+            raise ExecutionValidationError(
+                "IP block existed before execution; inverse action would remove a pre-existing control"
+            )
+        address = source.parameters.get("address")
         if not isinstance(address, str):
-            raise ExecutionValidationError("source firewall execution has no bound address")
+            raise ExecutionValidationError("source execution has no bound firewall address")
         return {"address": address, "reason_code": "rollback"}
     raise ExecutionValidationError("capability does not have a supported rollback mapping")
 
@@ -393,15 +409,14 @@ async def create_rollback_proposal(
 ) -> ActionProposal:
     if source.state not in {"SUCCEEDED", "VERIFICATION_FAILED", "AMBIGUOUS"}:
         raise ExecutionValidationError("execution is not eligible for rollback planning")
-    source_proposal = db.get(ActionProposal, source.proposal_id)
     capability = db.scalar(
         select(CapabilityDefinition).where(
             CapabilityDefinition.capability_id == source.capability,
             CapabilityDefinition.version == source.capability_version,
         )
     )
-    if source_proposal is None or capability is None:
-        raise ExecutionValidationError("source execution context is unavailable")
+    if capability is None:
+        raise ExecutionValidationError("source execution capability is unavailable")
     rollback = capability.manifest.get("rollback")
     if not isinstance(rollback, dict):
         raise ExecutionValidationError("capability is not reversible")
@@ -424,11 +439,11 @@ async def create_rollback_proposal(
         capability=rollback_capability,
         capability_version=rollback_version,
         target_asset_id=source.target_asset_id,
-        parameters=_rollback_parameters(source, source_proposal),
+        parameters=_rollback_parameters(source),
         reason=f"Rollback of execution {source.id}",
-        incident_id=source_proposal.incident_id,
-        evidence_ids=[uuid.UUID(item) for item in source_proposal.evidence_ids],
-        confidence=source_proposal.confidence,
+        incident_id=source.incident_id,
+        evidence_ids=[uuid.UUID(item) for item in source.evidence_ids],
+        confidence=source.confidence,
     )
     proposal = await create_action_proposal(
         db,
