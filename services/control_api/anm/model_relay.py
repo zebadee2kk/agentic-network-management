@@ -50,14 +50,21 @@ def _is_public_address(address: str) -> bool:
 
 async def validate_provider_endpoint(provider: ModelProvider) -> None:
     parsed = urlsplit(provider.base_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("provider base URL must use HTTP or HTTPS")
     if parsed.path.rstrip("/") != "/v1" or not parsed.hostname:
         raise ValueError("provider base URL must end with /v1")
+    if provider.locality not in {"external", "isolated_local"}:
+        raise ValueError("unknown model provider locality")
+
     hostname = parsed.hostname.lower().rstrip(".")
     if provider.locality == "isolated_local":
         if hostname not in settings.local_provider_hosts:
             raise ValueError("local provider host is not in ANM_AI_LOCAL_PROVIDER_HOSTS")
         return
 
+    if parsed.scheme != "https":
+        raise ValueError("external model providers require HTTPS")
     try:
         literal = ipaddress.ip_address(hostname)
         addresses = {str(literal)}
@@ -118,6 +125,8 @@ async def generate(request: RelayRequest) -> RelayResponse:
         provider = db.get(ModelProvider, request.provider_id)
         if provider is None or not provider.enabled:
             raise HTTPException(status_code=404, detail="model provider unavailable")
+        if provider.provider_type != "openai_compatible":
+            raise HTTPException(status_code=400, detail="unsupported model provider type")
         try:
             await validate_provider_endpoint(provider)
         except ValueError as exc:

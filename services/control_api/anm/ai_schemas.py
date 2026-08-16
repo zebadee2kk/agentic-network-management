@@ -38,9 +38,13 @@ class ModelProviderCreate(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def external_provider_requires_secret(self) -> "ModelProviderCreate":
-        if self.locality == "external" and not self.secret_ref:
-            raise ValueError("external model providers require an OpenBao secret reference")
+    def validate_locality_requirements(self) -> "ModelProviderCreate":
+        parsed = urlsplit(self.base_url)
+        if self.locality == "external":
+            if parsed.scheme != "https":
+                raise ValueError("external model providers require HTTPS")
+            if not self.secret_ref:
+                raise ValueError("external model providers require an OpenBao secret reference")
         return self
 
 
