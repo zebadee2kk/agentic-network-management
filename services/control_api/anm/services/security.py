@@ -52,9 +52,13 @@ def _parse_timestamp(value: Any) -> datetime:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     else:
         return utcnow()
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
+    return _as_utc(parsed)
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _json_digest(payload: dict[str, Any]) -> str:
@@ -67,7 +71,11 @@ def _dedupe_key(source: str, instance: str, source_event_id: str | None, digest:
     return hashlib.sha256(material).hexdigest()
 
 
-def _unique_asset_by_identifier(db: Session, namespace: str, value: str | None) -> uuid.UUID | None:
+def _unique_asset_by_identifier(
+    db: Session,
+    namespace: str,
+    value: str | None,
+) -> uuid.UUID | None:
     if not value:
         return None
     ids = set(
@@ -424,9 +432,17 @@ def observe_feature(
     return finding
 
 
-def _shared_indicator_reasons(db: Session, incident_id: uuid.UUID, event: CanonicalEvent) -> list[str]:
+def _shared_indicator_reasons(
+    db: Session,
+    incident_id: uuid.UUID,
+    event: CanonicalEvent,
+) -> list[str]:
     indicator_keys = ("src_ip", "dest_ip", "domain", "process_hash", "command_line")
-    current = {key: event.attributes.get(key) for key in indicator_keys if event.attributes.get(key)}
+    current = {
+        key: event.attributes.get(key)
+        for key in indicator_keys
+        if event.attributes.get(key)
+    }
     if not current:
         return []
     prior_events = db.scalars(
@@ -447,7 +463,8 @@ def _shared_indicator_reasons(db: Session, incident_id: uuid.UUID, event: Canoni
 def correlate_event(db: Session, event: CanonicalEvent) -> Incident | None:
     if event.asset_id is None or event.severity < CORRELATABLE_SEVERITY:
         return None
-    window_start = event.occurred_at - CORRELATION_WINDOW
+    event_time = _as_utc(event.occurred_at)
+    window_start = event_time - CORRELATION_WINDOW
     incident = db.scalar(
         select(Incident)
         .join(IncidentAsset, IncidentAsset.incident_id == Incident.id)
@@ -467,8 +484,8 @@ def correlate_event(db: Session, event: CanonicalEvent) -> Incident | None:
             severity=event.severity,
             confidence=event.confidence,
             summary=f"Deterministic incident opened from {event.source_connector} telemetry",
-            opened_at=event.occurred_at,
-            last_activity_at=event.occurred_at,
+            opened_at=event_time,
+            last_activity_at=event_time,
         )
         db.add(incident)
         db.flush()
@@ -488,7 +505,7 @@ def correlate_event(db: Session, event: CanonicalEvent) -> Incident | None:
         reasons.extend(_shared_indicator_reasons(db, incident.id, event))
         incident.severity = max(incident.severity, event.severity)
         incident.confidence = max(incident.confidence, event.confidence)
-        incident.last_activity_at = max(incident.last_activity_at, event.occurred_at)
+        incident.last_activity_at = max(_as_utc(incident.last_activity_at), event_time)
 
     evidence = IncidentEvidence(
         incident_id=incident.id,
@@ -499,7 +516,7 @@ def correlate_event(db: Session, event: CanonicalEvent) -> Incident | None:
     db.add(
         IncidentTimeline(
             incident_id=incident.id,
-            occurred_at=event.occurred_at,
+            occurred_at=event_time,
             entry_type="evidence_added",
             summary=event.summary,
             evidence_event_id=event.id,
@@ -584,7 +601,9 @@ def transition_incident(
     if new_state == incident.state:
         raise InvalidIncidentTransition("incident is already in requested state")
     if new_state not in INCIDENT_TRANSITIONS.get(incident.state, set()):
-        raise InvalidIncidentTransition(f"invalid incident transition {incident.state}->{new_state}")
+        raise InvalidIncidentTransition(
+            f"invalid incident transition {incident.state}->{new_state}"
+        )
     previous = incident.state
     incident.state = new_state
     now = utcnow()
