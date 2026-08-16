@@ -33,7 +33,7 @@ def main() -> None:
     required_control_networks = {"api", "control", "data", "secrets"}
     if not required_control_networks.issubset(control_networks):
         fail("control-api is missing a required internal network")
-    if control_networks & {"discovery", "telemetry", "model-egress", "ai"}:
+    if control_networks & {"discovery", "telemetry", "model-egress", "model-local", "ai"}:
         fail("control-api must not have worker/provider egress networks")
 
     discovery_networks = network_names(services["discovery-worker"])
@@ -44,16 +44,25 @@ def main() -> None:
     if telemetry_networks != {"control", "data", "secrets", "telemetry"}:
         fail("telemetry-worker network set is not least privilege")
 
-    # INV-001/002: the reasoning worker has no OpenBao network and no non-internal
-    # egress network. It reaches providers only through model-relay on `ai`.
+    # INV-001/002: the reasoning worker has no OpenBao, provider-local or egress
+    # network. It reaches all providers only through model-relay on internal `ai`.
     ai_worker_networks = network_names(services["ai-worker"])
     if ai_worker_networks != {"control", "data", "ai"}:
         fail("ai-worker must attach only to control, data and internal ai networks")
-    if ai_worker_networks & {"secrets", "discovery", "telemetry", "model-egress", "edge", "api"}:
-        fail("ai-worker gained a privileged or egress network")
+    if ai_worker_networks & {
+        "secrets",
+        "discovery",
+        "telemetry",
+        "model-egress",
+        "model-local",
+        "edge",
+        "api",
+    }:
+        fail("ai-worker gained a privileged, provider-local or egress network")
 
     relay_networks = network_names(services["model-relay"])
-    if relay_networks != {"ai", "data", "secrets", "model-egress"}:
+    expected_relay = {"ai", "data", "secrets", "model-local", "model-egress"}
+    if relay_networks != expected_relay:
         fail("model-relay network set is not least privilege")
     if relay_networks & {"discovery", "telemetry", "edge", "api", "control"}:
         fail("model-relay must not share managed/browser/control networks")
@@ -80,6 +89,15 @@ def main() -> None:
     if model_egress_members != {"model-relay"}:
         fail(f"only model-relay may use model egress, got {sorted(model_egress_members)}")
 
+    model_local_members = {
+        name for name, service in services.items() if "model-local" in network_names(service)
+    }
+    if model_local_members != {"model-relay"}:
+        fail(
+            "core compose model-local network must contain only model-relay; "
+            "optional local providers attach separately"
+        )
+
     ai_members = {name for name, service in services.items() if "ai" in network_names(service)}
     if ai_members != {"ai-worker", "model-relay"}:
         fail(f"internal ai network membership is unexpected: {sorted(ai_members)}")
@@ -98,7 +116,7 @@ def main() -> None:
         if network_names(services["ui"]) & network_names(services[protected_service]):
             fail(f"ui must not share a network with {protected_service}")
 
-    for internal_network in ("api", "control", "data", "secrets", "ai"):
+    for internal_network in ("api", "control", "data", "secrets", "ai", "model-local"):
         if not networks[internal_network].get("internal", False):
             fail(f"{internal_network} must be internal")
     for egress_network in ("discovery", "telemetry", "model-egress"):

@@ -20,30 +20,38 @@ incident state, approval state, policy or infrastructure.
 - validates schema and evidence references
 - persists model metadata and validated conclusions
 
-Networks: `control`, `data`, `ai` only. All are internal.
+Networks: `control`, `data`, `ai` only. All are internal. It is deliberately absent from
+`secrets`, `model-local`, `model-egress`, `discovery` and `telemetry`.
 
 ### `model-relay`
 
-- accepts requests only on internal `ai`
+- accepts requests from `ai-worker` only across internal `ai`
 - resolves provider configuration from PostgreSQL
 - resolves provider credential from OpenBao
 - validates provider destination
+- reaches optional local providers over separate internal `model-local`
+- reaches external providers over `model-egress`
 - performs OpenAI-compatible HTTP request
 - returns content and usage metadata
 
 It does not reason, choose tools, access managed connectors or persist credentials.
 
+The `model-local` split is important: an Ollama/LiteLLM-style container must not join the
+`ai` network because doing so would give `ai-worker` a direct path around `model-relay`.
+Optional local-provider deployments attach to `model-local`; only the relay belongs to
+both `ai` and `model-local`.
+
 ### Provider abstraction
 
 `ModelGateway.generate(ModelRequest) -> ModelResponse` is the internal contract.
 The initial implementation talks to the relay, not directly to a provider. The relay
-uses an OpenAI-compatible `/v1/chat/completions` request shape, allowing provider
-replacement without coupling agent orchestration to a provider SDK.
+uses an OpenAI-compatible base path ending in `/v1` plus `/chat/completions`, allowing
+provider replacement without coupling agent orchestration to a provider SDK.
 
 ## Invariant mapping
 
 - **INV-001:** ai-worker has no secret network/mount; provider key remains relay HTTP auth.
-- **INV-002:** ai-worker has no discovery/telemetry/model-egress network.
+- **INV-002:** ai-worker has no discovery/telemetry/model-local/model-egress network.
 - **INV-003:** models receive no shell, SSH, command or action tools.
 - **INV-010:** evidence remains explicitly untrusted and is serialized as data.
 - **INV-011:** persistent conclusions validate against versioned JSON schema.
@@ -58,9 +66,9 @@ Prompt text is defense in depth, not the authority boundary.
 The technical controls are:
 
 1. no provider-side tools
-2. no AI-worker managed-network route
+2. no AI-worker managed-network, provider-local or Internet route
 3. no AI-worker secret access
-4. minimized/redacted evidence
+4. lossy allowlisted evidence view plus deterministic redaction
 5. closed Pydantic/JSON schemas (`extra=forbid`)
 6. evidence-ID subset validation
 7. no automatic incident-state transition from model output
