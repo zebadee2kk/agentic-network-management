@@ -2,7 +2,18 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, Uuid
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from anm.db import Base
@@ -20,7 +31,9 @@ class CapabilityDefinition(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     capability_id: Mapped[str] = mapped_column(String(128), nullable=False)
     version: Mapped[str] = mapped_column(String(32), nullable=False)
     description: Mapped[str] = mapped_column(String(1024), nullable=False)
@@ -33,7 +46,9 @@ class CapabilityDefinition(Base):
     manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     implementation_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     capability_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
@@ -49,7 +64,9 @@ class ActionProposal(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     schema_version: Mapped[str] = mapped_column(String(16), default="1.0.0", nullable=False)
     revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     capability_definition_id: Mapped[uuid.UUID] = mapped_column(
@@ -80,8 +97,12 @@ class ActionProposal(Base):
     policy_source: Mapped[str] = mapped_column(String(32), default="fail_closed", nullable=False)
     policy_version: Mapped[str] = mapped_column(String(128), default="unknown", nullable=False)
     policy_input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    policy_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    policy_evaluated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
@@ -99,7 +120,9 @@ class ActionApproval(Base):
         CheckConstraint("decision IN ('approve','reject')", name="ck_action_approval_decision"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     proposal_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("action_proposals.id"), nullable=False
     )
@@ -114,4 +137,6 @@ class ActionApproval(Base):
     valid: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     invalidated_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
     invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
