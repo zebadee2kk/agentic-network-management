@@ -120,9 +120,11 @@ def create_execution_binding(
     _validate_binding_endpoint(request)
     if db.get(Asset, request.asset_id) is None:
         raise HTTPException(status_code=404, detail="asset not found")
-    if request.credential_reference_id is not None:
-        if db.get(CredentialReference, request.credential_reference_id) is None:
-            raise HTTPException(status_code=404, detail="credential reference not found")
+    if (
+        request.credential_reference_id is not None
+        and db.get(CredentialReference, request.credential_reference_id) is None
+    ):
+        raise HTTPException(status_code=404, detail="credential reference not found")
     binding = ExecutionBinding(**request.model_dump())
     db.add(binding)
     try:
@@ -219,7 +221,10 @@ async def dispatch_proposal(
     )
     db.commit()
     db.refresh(execution)
-    return DispatchResponse(execution=ExecutionResponse.model_validate(execution), duplicate=duplicate)
+    return DispatchResponse(
+        execution=ExecutionResponse.model_validate(execution),
+        duplicate=duplicate,
+    )
 
 
 @router.get(
