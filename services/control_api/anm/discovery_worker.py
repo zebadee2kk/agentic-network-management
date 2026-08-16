@@ -17,6 +17,12 @@ from anm.services.secrets import OpenBaoClient
 CONSUMER = "phase2-discovery-worker"
 SUBJECT = "discovery.run.requested"
 TERMINAL_RUN_STATES = {"succeeded", "failed"}
+OBSERVATION_SUBJECTS = [
+    "discovery.>",
+    "asset.observed.>",
+    "topology.observed.>",
+    "telemetry.>",
+]
 
 
 async def _connect_nats(url: str):
@@ -129,7 +135,7 @@ async def run_worker() -> None:
     except NotFoundError:
         await js.add_stream(
             name="OBSERVATIONS",
-            subjects=["discovery.>", "asset.observed.>", "topology.observed.>"],
+            subjects=OBSERVATION_SUBJECTS,
             storage="file",
         )
     subscription = await js.pull_subscribe(
