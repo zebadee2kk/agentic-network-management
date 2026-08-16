@@ -72,7 +72,10 @@ class ReadOnlyDiscoveryConnector(ABC):
                 )
                 raise ConnectorError(category, f"{self.connector_type} rejected read credentials")
             if response.status_code == 429:
-                raise ConnectorError("rate_limited", f"{self.connector_type} rate limited discovery")
+                raise ConnectorError(
+                    "rate_limited",
+                    f"{self.connector_type} rate limited discovery",
+                )
             response.raise_for_status()
             return response
         except ConnectorError:
