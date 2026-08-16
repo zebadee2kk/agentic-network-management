@@ -43,6 +43,18 @@ class StablePolicy:
         )
 
 
+class DenyPolicy:
+    async def evaluate_action(self, input_document: dict) -> ActionPolicyDecision:
+        del input_document
+        return ActionPolicyDecision(
+            decision="deny",
+            reasons=["test_fail_closed_dispatch"],
+            required_roles=[],
+            source="opa",
+            policy_version="phase6-test-policy-v2",
+        )
+
+
 def operator() -> Principal:
     return Principal(
         subject="operator@example.test",
@@ -212,6 +224,59 @@ async def test_duplicate_dispatch_returns_one_execution_and_one_side_effect_requ
 
 
 @pytest.mark.asyncio
+async def test_execution_snapshot_is_immutable_from_later_proposal_changes() -> None:
+    db = make_db()
+    asset, incident, evidence_id = seed_incident(db)
+    proposal = await authorized_endpoint_proposal(db, asset, incident, evidence_id)
+    bind_reference_endpoint(db, asset)
+    set_execution_enabled(db, enabled=True, reason="test window")
+    execution, _duplicate = await create_execution(
+        db,
+        proposal,
+        principal=operator(),
+        settings=Settings(),
+        policy=StablePolicy(),
+    )
+    db.commit()
+
+    expected_parameters = dict(execution.parameters)
+    expected_evidence = list(execution.evidence_ids)
+    expected_confidence = execution.confidence
+    proposal.parameters = {"reason_code": "operator_request", "duration_minutes": 10}
+    proposal.evidence_ids = []
+    proposal.confidence = 0.1
+    db.flush()
+
+    assert execution.parameters == expected_parameters
+    assert execution.evidence_ids == expected_evidence
+    assert execution.confidence == expected_confidence
+    assert execution.incident_id == incident.id
+
+
+@pytest.mark.asyncio
+async def test_dispatch_reauthorization_to_deny_blocks_execution_and_updates_state() -> None:
+    db = make_db()
+    asset, incident, evidence_id = seed_incident(db)
+    proposal = await authorized_endpoint_proposal(db, asset, incident, evidence_id)
+    bind_reference_endpoint(db, asset)
+    set_execution_enabled(db, enabled=True, reason="test window")
+    db.commit()
+
+    with pytest.raises(ExecutionValidationError, match="no longer authorized"):
+        await create_execution(
+            db,
+            proposal,
+            principal=operator(),
+            settings=Settings(),
+            policy=DenyPolicy(),
+        )
+
+    assert proposal.state == "DENIED"
+    assert proposal.policy_decision == "deny"
+    assert db.scalar(select(ActionExecution)) is None
+
+
+@pytest.mark.asyncio
 async def test_execution_claim_prevents_duplicate_worker_side_effect() -> None:
     db = make_db()
     asset, incident, evidence_id = seed_incident(db)
@@ -252,7 +317,13 @@ async def test_executor_success_is_not_success_when_independent_verification_fai
         policy=StablePolicy(),
     )
     claim_execution_for_run(db, execution.id)
-    mark_executor_result(db, execution, outcome="success", result={"isolated_requested": True})
+    mark_executor_result(
+        db,
+        execution,
+        outcome="success",
+        result={"isolated_requested": True},
+        pre_state={"known": True, "isolated": False},
+    )
     db.commit()
 
     claimed, previous = claim_execution_for_verification(db, execution.id)
@@ -352,6 +423,7 @@ async def test_rollback_is_a_new_policy_gated_capability_proposal() -> None:
         policy=StablePolicy(),
     )
     execution.state = "SUCCEEDED"
+    execution.pre_state = {"known": True, "isolated": False}
     db.commit()
 
     rollback = await create_rollback_proposal(
@@ -367,6 +439,64 @@ async def test_rollback_is_a_new_policy_gated_capability_proposal() -> None:
     assert rollback.parameters == {"reason_code": "rollback"}
     assert rollback.state == "AWAITING_APPROVAL"
     assert rollback.id != proposal.id
+    assert rollback.incident_id == execution.incident_id
+    assert rollback.evidence_ids == execution.evidence_ids
+
+
+@pytest.mark.asyncio
+async def test_rollback_refuses_unknown_pre_state() -> None:
+    db = make_db()
+    asset, incident, evidence_id = seed_incident(db)
+    proposal = await authorized_endpoint_proposal(db, asset, incident, evidence_id)
+    bind_reference_endpoint(db, asset)
+    set_execution_enabled(db, enabled=True, reason="test window")
+    execution, _duplicate = await create_execution(
+        db,
+        proposal,
+        principal=operator(),
+        settings=Settings(),
+        policy=StablePolicy(),
+    )
+    execution.state = "AMBIGUOUS"
+    execution.pre_state = {"known": False}
+    db.commit()
+
+    with pytest.raises(ExecutionValidationError, match="no known pre-state"):
+        await create_rollback_proposal(
+            db,
+            execution,
+            principal=operator(),
+            settings=Settings(),
+            policy=StablePolicy(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_rollback_refuses_to_remove_preexisting_endpoint_isolation() -> None:
+    db = make_db()
+    asset, incident, evidence_id = seed_incident(db)
+    proposal = await authorized_endpoint_proposal(db, asset, incident, evidence_id)
+    bind_reference_endpoint(db, asset)
+    set_execution_enabled(db, enabled=True, reason="test window")
+    execution, _duplicate = await create_execution(
+        db,
+        proposal,
+        principal=operator(),
+        settings=Settings(),
+        policy=StablePolicy(),
+    )
+    execution.state = "SUCCEEDED"
+    execution.pre_state = {"known": True, "isolated": True}
+    db.commit()
+
+    with pytest.raises(ExecutionValidationError, match="already isolated"):
+        await create_rollback_proposal(
+            db,
+            execution,
+            principal=operator(),
+            settings=Settings(),
+            policy=StablePolicy(),
+        )
 
 
 def test_executable_capabilities_bind_reviewed_implementation_artifacts() -> None:
