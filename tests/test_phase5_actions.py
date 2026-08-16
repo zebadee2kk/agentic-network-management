@@ -57,7 +57,11 @@ def make_db() -> Session:
     return db
 
 
-def seed_incident(db: Session, *, protected_roles: list[str] | None = None) -> tuple[Asset, Incident, uuid.UUID]:
+def seed_incident(
+    db: Session,
+    *,
+    protected_roles: list[str] | None = None,
+) -> tuple[Asset, Incident, uuid.UUID]:
     asset = Asset(
         display_name="LAB-ENDPOINT-01",
         asset_type="endpoint",
@@ -90,7 +94,11 @@ def seed_incident(db: Session, *, protected_roles: list[str] | None = None) -> t
     return asset, incident, event.id
 
 
-def proposal_request(asset: Asset, incident: Incident, evidence_id: uuid.UUID) -> ActionProposalCreate:
+def proposal_request(
+    asset: Asset,
+    incident: Incident,
+    evidence_id: uuid.UUID,
+) -> ActionProposalCreate:
     return ActionProposalCreate(
         capability="endpoint.isolate",
         capability_version="1.0.0",
@@ -202,10 +210,13 @@ async def test_revising_parameters_invalidates_prior_approval_and_changes_digest
     )
     old_digest = proposal.proposal_digest
 
+    revision = ActionProposalRevision(
+        parameters={"reason_code": "malware_containment", "duration_minutes": 30}
+    )
     invalidated = await revise_action_proposal(
         db,
         proposal,
-        ActionProposalRevision(parameters={"reason_code": "malware_containment", "duration_minutes": 30}),
+        revision,
         settings=settings,
         policy=policy,
     )
