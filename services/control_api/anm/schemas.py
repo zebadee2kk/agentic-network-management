@@ -175,7 +175,9 @@ class ConnectorInstanceCreate(BaseModel):
         if parsed.username or parsed.password:
             raise ValueError("connector base_url must not contain credentials")
         if parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
-            raise ValueError("connector base_url must be an origin without path, query, or fragment")
+            raise ValueError(
+                "connector base_url must be an origin without path, query, or fragment"
+            )
         hostname = parsed.hostname.lower().rstrip(".")
         if hostname in FORBIDDEN_CONNECTOR_HOSTS or hostname.endswith(".localhost"):
             raise ValueError("connector base_url targets a protected platform host")
