@@ -5,7 +5,6 @@ from contextlib import suppress
 
 import nats
 from nats.errors import TimeoutError as NATSTimeoutError
-from nats.js.errors import NotFoundError
 
 from anm.config import get_settings
 from anm.db import SessionLocal
@@ -13,6 +12,7 @@ from anm.models import DiscoveryRun, OutboxEvent, utcnow
 from anm.services.discovery import DiscoveryConfigurationError, execute_discovery_run
 from anm.services.events import claim_message
 from anm.services.secrets import OpenBaoClient
+from anm.services.streams import ensure_stream
 
 CONSUMER = "phase2-discovery-worker"
 SUBJECT = "discovery.run.requested"
@@ -130,14 +130,7 @@ async def run_worker() -> None:
     secrets = OpenBaoClient(settings)
     nc = await _connect_nats(settings.nats_url)
     js = nc.jetstream()
-    try:
-        await js.stream_info("OBSERVATIONS")
-    except NotFoundError:
-        await js.add_stream(
-            name="OBSERVATIONS",
-            subjects=OBSERVATION_SUBJECTS,
-            storage="file",
-        )
+    await ensure_stream(js, name="OBSERVATIONS", subjects=OBSERVATION_SUBJECTS)
     subscription = await js.pull_subscribe(
         SUBJECT,
         durable=CONSUMER,
