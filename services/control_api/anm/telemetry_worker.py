@@ -6,11 +6,12 @@ from contextlib import suppress
 import nats
 from nats.errors import TimeoutError as NATSTimeoutError
 from nats.js.errors import NotFoundError
+from sqlalchemy import select
 
 from anm.config import get_settings
 from anm.connectors.wazuh import WazuhConnectorError, WazuhIndexerConnector
 from anm.db import SessionLocal
-from anm.models import ManagedScope, OutboxEvent, utcnow
+from anm.models import EventProcessingReceipt, ManagedScope, OutboxEvent, utcnow
 from anm.security_models import TelemetrySource
 from anm.services.discovery import DiscoveryConfigurationError, validate_connector_endpoint
 from anm.services.events import claim_message
@@ -38,6 +39,25 @@ async def _heartbeat(message, stop: asyncio.Event) -> None:
                 await message.in_progress()
 
 
+def _already_processed(message_id: str) -> bool:
+    with SessionLocal() as db:
+        return (
+            db.scalar(
+                select(EventProcessingReceipt.id).where(
+                    EventProcessingReceipt.consumer == CONSUMER,
+                    EventProcessingReceipt.message_id == message_id,
+                )
+            )
+            is not None
+        )
+
+
+def _mark_processed(message_id: str) -> None:
+    with SessionLocal() as db:
+        claim_message(db, consumer=CONSUMER, message_id=message_id)
+        db.commit()
+
+
 async def _process_source(source_id: uuid.UUID, secrets: OpenBaoClient) -> tuple[int, int]:
     with SessionLocal() as db:
         source = db.get(TelemetrySource, source_id)
@@ -51,8 +71,7 @@ async def _process_source(source_id: uuid.UUID, secrets: OpenBaoClient) -> tuple
         if scope is None or not scope.enabled:
             raise DiscoveryConfigurationError("Wazuh source scope is unavailable")
 
-        # The endpoint must be in the explicit management egress allowlist before
-        # the worker is permitted to dereference the Wazuh credential.
+        # Validate management egress before dereferencing the Wazuh credential.
         await validate_connector_endpoint(source.base_url, scope.connector_cidrs)
         secret = await secrets.read_kv_v2(source.secret_ref)
         connector = WazuhIndexerConnector(
@@ -83,13 +102,13 @@ async def _process_source(source_id: uuid.UUID, secrets: OpenBaoClient) -> tuple
             source.cursor = {"search_after": next_cursor}
         source.status = "healthy"
         source.updated_at = utcnow()
-        message_id = str(uuid.uuid4())
+        completion_id = str(uuid.uuid4())
         db.add(
             OutboxEvent(
                 subject="telemetry.wazuh.poll_completed",
-                message_id=message_id,
+                message_id=completion_id,
                 payload={
-                    "message_id": message_id,
+                    "message_id": completion_id,
                     "source_id": str(source.id),
                     "accepted": accepted,
                     "duplicates": duplicates,
@@ -109,17 +128,15 @@ async def _handle_message(message, secrets: OpenBaoClient) -> None:
         await message.term()
         return
 
-    with SessionLocal() as db:
-        if not claim_message(db, consumer=CONSUMER, message_id=message_id):
-            db.rollback()
-            await message.ack()
-            return
-        db.commit()
+    if _already_processed(message_id):
+        await message.ack()
+        return
 
     stop = asyncio.Event()
     heartbeat = asyncio.create_task(_heartbeat(message, stop))
     try:
         await _process_source(source_id, secrets)
+        _mark_processed(message_id)
         await message.ack()
     except (DiscoveryConfigurationError, WazuhConnectorError):
         with SessionLocal() as db:
@@ -128,6 +145,7 @@ async def _handle_message(message, secrets: OpenBaoClient) -> None:
                 source.status = "degraded"
                 source.updated_at = utcnow()
                 db.commit()
+        _mark_processed(message_id)
         await message.ack()
     except Exception:
         with SessionLocal() as db:
@@ -136,8 +154,8 @@ async def _handle_message(message, secrets: OpenBaoClient) -> None:
                 source.status = "degraded"
                 source.updated_at = utcnow()
                 db.commit()
-        # Polling is read-only and canonical event persistence is deduplicated. A
-        # transient worker crash can therefore safely redeliver the poll request.
+        # Polling is read-only and canonical event persistence is deduplicated, so
+        # a transient crash can safely redeliver the request until it completes.
         await message.nak(delay=5)
     finally:
         stop.set()
