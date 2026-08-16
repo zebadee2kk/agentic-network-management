@@ -384,7 +384,8 @@ def _rollback_parameters(source: ActionExecution) -> dict[str, Any]:
     if source.capability == "endpoint.isolate":
         if source.pre_state.get("isolated") is True:
             raise ExecutionValidationError(
-                "endpoint was already isolated before execution; inverse action would not restore pre-state"
+                "endpoint was already isolated before execution; "
+                "inverse action would not restore pre-state"
             )
         return {"reason_code": "rollback"}
     if source.capability == "firewall.block_ip":
