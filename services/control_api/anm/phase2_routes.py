@@ -16,6 +16,7 @@ from anm.models import (
     ConnectorInstance,
     DiscoveryRun,
     ManagedScope,
+    OutboxEvent,
     ReconciliationCandidate,
     TopologyEdge,
 )
@@ -36,19 +37,15 @@ from anm.schemas import (
     TopologyEdgeResponse,
 )
 from anm.services.audit import AuditService
-from anm.services.discovery import DiscoveryConfigurationError, execute_discovery_run
 from anm.services.reconciliation import (
     ImmutableIdentityConflict,
     rebuild_topology,
     resolve_candidate,
 )
-from anm.services.secrets import OpenBaoClient
-from anm.state import get_openbao_client
 
 router = APIRouter()
 Db = Annotated[Session, Depends(get_db)]
 CurrentPrincipal = Annotated[Principal, Depends(get_principal)]
-Secrets = Annotated[OpenBaoClient, Depends(get_openbao_client)]
 
 
 @router.post(
@@ -142,18 +139,27 @@ def list_connectors(db: Db, principal: CurrentPrincipal) -> list[ConnectorInstan
 @router.post(
     "/api/v1/discovery/runs",
     response_model=DiscoveryRunResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
     tags=["discovery"],
 )
-async def run_discovery(
+def run_discovery(
     request: DiscoveryRunCreate,
     db: Db,
     principal: CurrentPrincipal,
-    secrets: Secrets,
 ) -> DiscoveryRun:
     connector = db.get(ConnectorInstance, request.connector_instance_id)
     if connector is None:
         raise HTTPException(status_code=404, detail="connector not found")
+    scope = db.get(ManagedScope, connector.scope_id)
+    if scope is None:
+        raise HTTPException(status_code=409, detail="connector scope no longer exists")
+    if not scope.enabled:
+        raise HTTPException(status_code=409, detail="managed scope is disabled")
+    if not scope.connector_cidrs:
+        raise HTTPException(status_code=400, detail="managed scope has no connector_cidrs")
+    if not connector.secret_ref:
+        raise HTTPException(status_code=400, detail="connector has no OpenBao secret reference")
+
     run = DiscoveryRun(
         scope_id=connector.scope_id,
         connector_instance_id=connector.id,
@@ -161,35 +167,29 @@ async def run_discovery(
     )
     db.add(run)
     db.flush()
-    run_id = run.id
+    message_id = str(uuid.uuid4())
+    db.add(
+        OutboxEvent(
+            subject="discovery.run.requested",
+            message_id=message_id,
+            payload={
+                "message_id": message_id,
+                "run_id": str(run.id),
+                "connector_id": str(connector.id),
+                "scope_id": str(scope.id),
+            },
+        )
+    )
     AuditService.record(
         db,
         principal=principal,
         action="discovery.run",
-        outcome="started",
-        details={"run_id": str(run_id), "connector_id": str(connector.id)},
+        outcome="queued",
+        details={"run_id": str(run.id), "connector_id": str(connector.id)},
     )
     db.commit()
-    try:
-        result = await execute_discovery_run(db, run, secrets)
-    except DiscoveryConfigurationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    AuditService.record(
-        db,
-        principal=principal,
-        action="discovery.run",
-        outcome=result.status,
-        details={
-            "run_id": str(run_id),
-            "observations": result.observations_count,
-            "reconciled": result.reconciled_count,
-            "conflicts": result.conflicts_count,
-            "error_category": result.error_category,
-        },
-    )
-    db.commit()
-    db.refresh(result)
-    return result
+    db.refresh(run)
+    return run
 
 
 @router.get(
