@@ -56,6 +56,10 @@ def upgrade() -> None:
         sa.Column("capability", sa.String(length=128), nullable=False),
         sa.Column("capability_version", sa.String(length=32), nullable=False),
         sa.Column("target_asset_id", sa.Uuid(), nullable=False),
+        sa.Column("parameters", sa.JSON(), nullable=False),
+        sa.Column("incident_id", sa.Uuid(), nullable=False),
+        sa.Column("evidence_ids", sa.JSON(), nullable=False),
+        sa.Column("confidence", sa.Float(), nullable=False),
         sa.Column("proposal_digest", sa.String(length=64), nullable=False),
         sa.Column("capability_digest", sa.String(length=64), nullable=False),
         sa.Column("implementation_digest", sa.String(length=64), nullable=False),
@@ -78,7 +82,12 @@ def upgrade() -> None:
             "'SUCCEEDED','FAILED','AMBIGUOUS','VERIFICATION_FAILED','CANCELLED')",
             name="ck_action_execution_state",
         ),
+        sa.CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_action_execution_confidence_range",
+        ),
         sa.ForeignKeyConstraint(["binding_id"], ["execution_bindings.id"]),
+        sa.ForeignKeyConstraint(["incident_id"], ["incidents.id"]),
         sa.ForeignKeyConstraint(["proposal_id"], ["action_proposals.id"]),
         sa.ForeignKeyConstraint(
             ["rollback_of_execution_id"],
