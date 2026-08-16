@@ -303,10 +303,42 @@ async def create_approval(
             policy=policy,
         )
     except PermissionError as exc:
-        db.rollback()
+        AuditService.record(
+            db,
+            principal=principal,
+            action="action.approval.blocked",
+            outcome="forbidden",
+            details={
+                "proposal_id": str(proposal.id),
+                "proposal_digest": proposal.proposal_digest,
+                "policy_version": proposal.policy_version,
+                "policy_source": proposal.policy_source,
+                "policy_reasons": proposal.policy_reasons,
+                "proposal_state": proposal.state,
+            },
+        )
+        # The re-evaluation performed before the role check is security state.
+        # Persist it so a policy change or fail-closed result cannot be rolled back
+        # merely because this principal is not allowed to approve the new state.
+        db.commit()
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ActionValidationError as exc:
-        db.rollback()
+        AuditService.record(
+            db,
+            principal=principal,
+            action="action.approval.blocked",
+            outcome="not_awaiting_approval",
+            details={
+                "proposal_id": str(proposal.id),
+                "proposal_digest": proposal.proposal_digest,
+                "policy_version": proposal.policy_version,
+                "policy_source": proposal.policy_source,
+                "policy_reasons": proposal.policy_reasons,
+                "proposal_state": proposal.state,
+            },
+        )
+        # As above, preserve deny/policy-drift/capability-drift invalidation state.
+        db.commit()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except IntegrityError as exc:
         db.rollback()
