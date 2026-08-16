@@ -27,32 +27,36 @@ class ReferenceEndpointExecutor:
         timeout = float(context.binding_config.get("timeout_seconds", 15))
         state_url = f"{context.endpoint}/v1/endpoints/{context.target_asset_id}/isolation"
         was_isolated = False
+        pre_state_known = False
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 before = await client.get(state_url, headers=headers)
                 before.raise_for_status()
                 payload = before.json()
                 was_isolated = bool(payload.get("isolated", False))
-                response = await client.put(
-                    state_url,
-                    headers=headers,
-                    json={
-                        "isolated": desired,
-                        "execution_id": context.execution_id,
-                    },
-                )
-                response.raise_for_status()
+                pre_state_known = True
+                if was_isolated != desired:
+                    response = await client.put(
+                        state_url,
+                        headers=headers,
+                        json={
+                            "isolated": desired,
+                            "execution_id": context.execution_id,
+                        },
+                    )
+                    response.raise_for_status()
         except httpx.TimeoutException:
             return ExecutionOutcome(
                 outcome="ambiguous",
                 category="remote_execution_timeout",
-                pre_state={"isolated": was_isolated},
+                pre_state={"known": pre_state_known, "isolated": was_isolated},
+                result={"isolated_requested": desired},
             )
         except (httpx.HTTPError, ValueError, TypeError):
             return ExecutionOutcome(outcome="failed", category="endpoint_adapter_failure")
         return ExecutionOutcome(
             outcome="success",
-            pre_state={"isolated": was_isolated},
+            pre_state={"known": True, "isolated": was_isolated},
             result={"isolated_requested": desired},
         )
 
@@ -68,45 +72,48 @@ class ReferenceFirewallExecutor:
         address = context.parameters.get("address")
         if not isinstance(address, str):
             return ExecutionOutcome(outcome="failed", category="invalid_ip_parameter")
+        desired = context.capability == "firewall.block_ip"
         timeout = float(context.binding_config.get("timeout_seconds", 15))
         encoded_address = quote(address, safe="")
         state_url = f"{context.endpoint}/v1/firewall/blocks/{encoded_address}"
         existed = False
+        pre_state_known = False
+        result = {"address": address, "blocked_requested": desired}
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 before = await client.get(state_url, headers=headers)
                 if before.status_code not in {200, 404}:
                     before.raise_for_status()
                 existed = before.status_code == 200
-                if context.capability == "firewall.block_ip":
-                    response = await client.put(
-                        state_url,
-                        headers=headers,
-                        json={
-                            "execution_id": context.execution_id,
-                            "reason_code": context.parameters.get("reason_code"),
-                        },
-                    )
-                else:
-                    response = await client.delete(
-                        state_url,
-                        headers=headers,
-                        params={"execution_id": context.execution_id},
-                    )
-                response.raise_for_status()
+                pre_state_known = True
+                if existed != desired:
+                    if desired:
+                        response = await client.put(
+                            state_url,
+                            headers=headers,
+                            json={
+                                "execution_id": context.execution_id,
+                                "reason_code": context.parameters.get("reason_code"),
+                            },
+                        )
+                    else:
+                        response = await client.delete(
+                            state_url,
+                            headers=headers,
+                            params={"execution_id": context.execution_id},
+                        )
+                    response.raise_for_status()
         except httpx.TimeoutException:
             return ExecutionOutcome(
                 outcome="ambiguous",
                 category="remote_execution_timeout",
-                pre_state={"block_existed": existed},
+                pre_state={"known": pre_state_known, "block_existed": existed},
+                result=result,
             )
         except (httpx.HTTPError, ValueError, TypeError):
             return ExecutionOutcome(outcome="failed", category="firewall_adapter_failure")
         return ExecutionOutcome(
             outcome="success",
-            pre_state={"block_existed": existed},
-            result={
-                "address": address,
-                "blocked_requested": context.capability == "firewall.block_ip",
-            },
+            pre_state={"known": True, "block_existed": existed},
+            result=result,
         )
