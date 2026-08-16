@@ -115,7 +115,10 @@ class LibreNMSConnector(ReadOnlyDiscoveryConnector):
             payload = response.json()
             devices = payload["devices"]
         except (ValueError, KeyError, TypeError) as exc:
-            raise ConnectorError("invalid_response", "LibreNMS returned invalid device data") from exc
+            raise ConnectorError(
+                "invalid_response",
+                "LibreNMS returned invalid device data",
+            ) from exc
         if not isinstance(devices, list):
             raise ConnectorError("invalid_response", "LibreNMS device results were not a list")
         observations: list[ObservationCreate] = []
