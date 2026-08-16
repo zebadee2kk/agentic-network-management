@@ -267,9 +267,12 @@ async def evaluate_proposal(
         new_input_digest,
     )
     invalidated = 0
-    if invalidate_on_policy_change and proposal.policy_evaluated_at is not None:
-        if previous_binding != new_binding:
-            invalidated = invalidate_approvals(db, proposal, "policy_binding_changed")
+    if (
+        invalidate_on_policy_change
+        and proposal.policy_evaluated_at is not None
+        and previous_binding != new_binding
+    ):
+        invalidated = invalidate_approvals(db, proposal, "policy_binding_changed")
 
     proposal.policy_input_digest = new_input_digest
     proposal.policy_decision = decision.decision
@@ -444,7 +447,7 @@ async def record_approval(
         settings=settings,
         policy=policy,
     )
-    if proposal.policy_decision != "require_approval" or proposal.state == "DENIED":
+    if proposal.policy_decision != "require_approval" or proposal.state != "AWAITING_APPROVAL":
         raise ActionValidationError("proposal is not awaiting human approval")
     if not proposal.required_roles:
         raise ActionValidationError("policy did not identify an approval role")
