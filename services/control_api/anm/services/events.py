@@ -6,12 +6,12 @@ from datetime import UTC, datetime
 import nats
 from nats.aio.client import Client as NATS
 from nats.js import JetStreamContext
-from nats.js.errors import NotFoundError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from anm.models import EventProcessingReceipt, OutboxEvent, PlatformSetting
+from anm.services.streams import ensure_stream
 
 
 class EventBus:
@@ -54,10 +54,7 @@ class EventBus:
             "DOMAIN_EVENTS": ["asset.changed.>", "topology.changed.>", "finding.>", "incident.>"],
         }
         for name, subjects in streams.items():
-            try:
-                await self._js.stream_info(name)
-            except NotFoundError:
-                await self._js.add_stream(name=name, subjects=subjects, storage="file")
+            await ensure_stream(self._js, name=name, subjects=subjects)
 
     async def _dispatch_loop(self) -> None:
         while not self._stop.is_set():
