@@ -16,6 +16,7 @@ from anm.services.secrets import OpenBaoClient
 
 CONSUMER = "phase2-discovery-worker"
 SUBJECT = "discovery.run.requested"
+TERMINAL_RUN_STATES = {"succeeded", "failed"}
 
 
 async def _connect_nats(url: str):
@@ -38,26 +39,52 @@ def _fail_run(run_id: uuid.UUID, category: str, detail: str) -> None:
         db.commit()
 
 
+async def _keep_message_alive(message, done: asyncio.Event) -> None:
+    """Extend the JetStream acknowledgement lease during a long read-only discovery."""
+    while not done.is_set():
+        try:
+            await asyncio.wait_for(done.wait(), timeout=10)
+        except TimeoutError:
+            with suppress(Exception):
+                await message.in_progress()
+
+
 async def _handle_message(message, secrets: OpenBaoClient) -> None:
     try:
         payload = json.loads(message.data.decode("utf-8"))
         message_id = str(payload["message_id"])
         run_id = uuid.UUID(str(payload["run_id"]))
-    except (ValueError, KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+    except (ValueError, KeyError, TypeError, UnicodeDecodeError):
         await message.term()
         return
 
+    lease_done = asyncio.Event()
+    lease_task: asyncio.Task[None] | None = None
     try:
         with SessionLocal() as db:
-            if not claim_message(db, consumer=CONSUMER, message_id=message_id):
-                db.rollback()
-                await message.ack()
-                return
             run = db.get(DiscoveryRun, run_id)
             if run is None:
-                db.commit()
                 await message.term()
                 return
+
+            claimed = claim_message(db, consumer=CONSUMER, message_id=message_id)
+            if not claimed:
+                db.rollback()
+                run = db.get(DiscoveryRun, run_id)
+                if run is None:
+                    await message.term()
+                    return
+                if run.status in TERMINAL_RUN_STATES:
+                    await message.ack()
+                    return
+                # A previous worker may have committed the receipt/status and died
+                # before acknowledging. Discovery is GET-only and reconciliation is
+                # identity/idempotency guarded, so recovering the unfinished run is safe.
+
+            lease_task = asyncio.create_task(
+                _keep_message_alive(message, lease_done),
+                name=f"discovery-lease-{run_id}",
+            )
             result = await execute_discovery_run(db, run, secrets)
             completion_message_id = str(uuid.uuid4())
             db.add(
@@ -82,9 +109,14 @@ async def _handle_message(message, secrets: OpenBaoClient) -> None:
         await message.ack()
     except Exception:
         _fail_run(run_id, "worker_error", "discovery worker failed; inspect redacted logs")
-        # The authoritative run is marked failed rather than blindly retrying an
-        # operation whose upstream outcome might be ambiguous.
+        # Read-only discovery failures are made explicit rather than endlessly
+        # redelivered. Operators can inspect the run and request another run.
         await message.ack()
+    finally:
+        lease_done.set()
+        if lease_task is not None:
+            with suppress(Exception):
+                await lease_task
 
 
 async def run_worker() -> None:
